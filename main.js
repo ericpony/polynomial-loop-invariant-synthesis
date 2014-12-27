@@ -579,7 +579,7 @@ function main() {
             //console.log("Rule:\n".bold + ruleZ3);
             var z3_prog = z3_formula + ruleZ3 + "\n";
             /* check if the formula (without free variables) is satisfiable */
-            constraints.forEach(function(c){ z3_prog += c + "\n" });
+            //constraints.forEach(function(c){ z3_prog += c + "\n" });
             z3_prog += "print s.check()";
             var result = sh.exec('echo "' + z3_prog + '" | tee z3.qcheck.log | python -').stdout;
             var passed = /^sat/.test(result);
