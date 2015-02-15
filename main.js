@@ -33,7 +33,7 @@ var Settings = {
     verbose_level: 0,
 };
 var precond, postcond, testcase, num_refinement = 0;
-var USE_APPROX_ROUNDING = false; 
+var USE_APPROX_ROUNDING = false;
 
 function I(x, y, n) {
     if(n!==undefined)
@@ -48,7 +48,7 @@ function isInt(x) { return (typeof x==='number' && (x%1)===0); }
 function gcd(a, b) { return b ? gcd(b, a % b) : a; }
 function lcm(a, b) { return !a||!b ? 0 : a*b/gcd(a,b); }
 function bool_val(val) {
-    var sval = val.toString().toLowerCase(); 
+    var sval = val.toString().toLowerCase();
     return (sval=='true'||sval=='yes'||sval=='1'||sval=='t') ? true : (sval=='false'||sval=='no'||sval=='0'||sval=='f') ? false : Boolean(val);
 }
 
@@ -94,7 +94,7 @@ var Timer = {
     timers: {},
     tick: function(mark) { if(this.timers[mark]) this.stop(mark); else this.start(mark); },
     start: function(mark){ this.timers[mark] = process.hrtime(); },
-    stop:  function(mark){ 
+    stop:  function(mark){
         if(!this.timers[mark]) throw 'Should start a timer before stopping it: ' + mark;
         var elapsed = process.hrtime(this.timers[mark]);
         elapsed = elapsed[0] + elapsed[1]*1e-9;
@@ -263,14 +263,14 @@ function compute_standard_basis(num_samples, monomials, sample_space) {
     for(var i=0; i<monomials.length; i++)
         for(var j=0; j<monomials.length; j++)
             basis.push(i==j? 1 : 0);
-    var point_weights = sample_space.map(function(s,i){ 
-            return [i, s.point.split(' ').reduce(function(a,b){ return a+(b=='1'||b=='0'?0:1) }, 0)] 
+    var point_weights = sample_space.map(function(s,i){
+            return [i, s.point.split(' ').reduce(function(a,b){ return a+(b=='1'||b=='0'?0:1) }, 0)]
         }).sort(function(a,b){ return a[1] - b[1] });
     var samples = [];
     for(var i=0; i<num_samples; i++) samples.push(sample_space[point_weights[i][0]]);
     return [basis, samples];
 }
-/** 
+/**
  *  Compute a Lagrange basis by random sampling.
  *  Note that sample points are assumed to be integers.
  */
@@ -294,7 +294,6 @@ function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample
                 log("Result\n".bold + sh.exec(command).stdout);
                 throw 'Invalid Lagrange basis!';
             }
-            //log('Command: ' + command); process.exit();
 
             var detV = Math.abs(detVandermonde);
             var sign = detVandermonde>0 ? 1 : -1;
@@ -309,7 +308,7 @@ function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample
                 var val = n + '/' + m;
                 if(!USE_APPROX_ROUNDING) return val;
 
-                val = round(eval(val), 3).toString();  
+                val = round(eval(val), 3).toString();
                 var dot = val.indexOf('.');
                 if(dot<0) return val;
                 var n_digits = val.length - dot - 1;
@@ -318,7 +317,6 @@ function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample
                 val = val.replace('.','') + '/' + base;
                 return val[0]=='-' ? val.replace(/^\-0+/,'-') : val.replace(/^0+/,'');
             });
-            //log("Basis\n".bold + basis, Verbose.INFORMATIVE);
             var result = basis;
         }else
             var result = null;
@@ -326,7 +324,7 @@ function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample
     }
     var point_weights = sample_space.map(function(s){
             var weight = Math.pow(1-skewness, s.diff===undefined ? 1/(1-skewness) : s.diff);
-//            var weight = Math.pow(1-skewness, s.diff===undefined ? 1/(1-skewness)/(1-skewness) : s.diff);
+//          var weight = Math.pow(1-skewness, s.diff===undefined ? 1/(1-skewness)/(1-skewness) : s.diff);
             log(pt_str(s.point) + ' ' + s.constraint + ' ' + round(weight,4).toString().cyan, Verbose.INFORMATIVE+1);
             return [s.point, weight];
         });
@@ -377,7 +375,6 @@ function refine_constraint(coeff_list, constraint, constraints) {
     z3_formula += "s.check()\nprint s.model()";
 
     var result = sh.exec('echo "' + z3_formula + '" | tee z3.refine.log | python -').stdout;
-    //Timer.tick('Guessing coefficients');
     Timer.tick('Guessing coefficients');
 
     // sat
@@ -455,7 +452,7 @@ function main() {
         console.log('[Error] Skewness should be between 0 and 1.'.bold);
         return;
     }
- 
+
     var _testcase = require('./test-cases/' + test_name);
     testcase = {};
     for(var name in _testcase){
@@ -527,13 +524,10 @@ function main() {
     var basis   = result[0];
     var samples = result[1];
     var points  = samples.map(function(s){ return s.point });
-    //basis = basis.split("\n").slice(2);
 
     var template_terms = build_template(num_samples, monomials, basis);
     var template = template_terms.map(function(t,i){ return 'I_' + (i+1) + '_*(' + t + ')' }).join('+');
 
-    //log("Template terms\n".bold + template_terms.join("\n")); log("Template\n".bold + template); throw '';
-    
     log("Sampling\n".bold +'Points: (' + samples.map(function(s){ return s.point }).join('), (') + ')', Verbose.INFORMATIVE);
     if(Settings.verbose_level>=Verbose.INFORMATIVE)
         samples.forEach(function(s){ console.log(pt_str(s.point) + ' ' + s.constraint) });
@@ -575,18 +569,11 @@ function main() {
         free_coeffs.map(function(c){
             var cc = 'I_' + (coeff_list.length+1) + '_';
             constraint = constraint.replace(new RegExp(c.replace(/([\[\]])/g,'\\$1'),'g'), cc);
-            coeff_list.push(cc);            
+            coeff_list.push(cc);
         });
     })(constraint.match(/I\[[^\]]+\]/g));
     */
     log("Constraint after replacing free coeff:\n".bold + constraint, Verbose.INFORMATIVE);
-    
-    //Solution for random-walk
-    //if(USE_STANDARD_BASIS)
-    //constraint += ' and I_2_==1 and I_10_==-1 and I_9_==1 and I_3_==0 and I_4_==0 and I_5_==0 and I_7_==0 and I_8_==0 and I_1_==0 and I_6_==0'; 
-
-    //constraint = 'I_2_==1 and I_10_==-1 and I_9_==1 and I_3_==0 and I_4_==0 and I_5_==0 and I_7_==0 and I_8_==0 and I_1_==0 and I_6_==0'; 
-
     log("Basis\n".bold + basis, Verbose.INFORMATIVE);
     log("Coeff names\n".bold + coeff_list.map(function(n){ return n.substr(0,n.length-1) }), Verbose.INFORMATIVE);
     log("Constraint for coefficients\n".bold + constraint);
@@ -616,8 +603,8 @@ function main() {
         return expr;
     }
 
-    function mk_symbolic(formula) { 
-        return formula.replace(/(-?[0-9]+\/[\.0-9]+)/g, 'RealVal(\'$1\')') 
+    function mk_symbolic(formula) {
+        return formula.replace(/(-?[0-9]+\/[\.0-9]+)/g, 'RealVal(\'$1\')')
     }
 
     function find_right_paren_pos(str, start) {
@@ -634,10 +621,10 @@ function main() {
     }
 
     function template_to_string(coeff, var_names, template) {
-        var _z3_prog_header = "from z3 import *\n" + var_names.map(function(name){ 
-            return name + " = Real('" + name + "')\n" 
+        var _z3_prog_header = "from z3 import *\n" + var_names.map(function(name){
+            return name + " = Real('" + name + "')\n"
         }).join('') + "s = Solver()\n";
-        var _z3_prog = mk_symbolic(bind_coeff(coeff, template.replace(/\$(\d+)/g, 
+        var _z3_prog = mk_symbolic(bind_coeff(coeff, template.replace(/\$(\d+)/g,
             function(a,i){ return var_names[i-1] }
         )));
         _z3_prog = _z3_prog_header + 'print simplify(' + _z3_prog + ')';
@@ -877,7 +864,7 @@ function main() {
         //redlog = redlog.replace(/\+0/g,''); // remove "+0+0...+0" substring
 
         var command = "echo '" + redlog + "' | tee solver.log | ./reduce";
-        result = sh.exec(command).stdout;        
+        result = sh.exec(command).stdout;
 
         log();
         log("Redlog code\n".bold + redlog, Verbose.INFORMATIVE);
@@ -1127,7 +1114,7 @@ function main() {
            // yes
            if(result[0]) {
                result = verify_poly(coeff);
-               if(result[0]) return coeff;          // invariant found; return coeff 
+               if(result[0]) return coeff;          // invariant found; return coeff
                if(!result[1]) return result[0];     // invariant doesn't exist
                sample_space.unshift({point: result[1], toString: Sample.prototype.toString});
                //log("Sample space: ".bold + sample_space.map(function(s){ return s.toString() }).join(','));
@@ -1175,9 +1162,9 @@ function main() {
     for(var mark in Counters) {
         console.error(mark + ":\t" + Counters[mark].toString().cyan);
     }
-    console.error('No. of refinements:\t' + num_refinement.toString().cyan); 
-    console.error('Pre-expectation:\t' + pre); 
-    console.error('Post-expectation:\t' + post); 
+    console.error('No. of refinements:\t' + num_refinement.toString().cyan);
+    console.error('Pre-expectation:\t' + pre);
+    console.error('Post-expectation:\t' + post);
     console.error("Invariant:\t\t" + result.cyan);
     return;
 }
