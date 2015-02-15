@@ -13,7 +13,7 @@ module.exports = {
                var lower = precond(x,y,n);
                var upper = undefined;
                constraints.push(lower + '<=' + I(x,y,n));
-               if(0<x && x<y) constraints.push('2*' + I(x,y,n) + '<=' + I(x+1,y,n-1) + '+' + I(x-1,y,n+1)); // rule 2
+               if(0<x && x<y) constraints.push('2*' + I(x,y,n) + '<=' + I(x+1,y,n+1) + '+' + I(x-1,y,n+1)); // rule 2
                if(x==0 || x==y) {
                    upper = postcond(x,y,n);
                    constraints.push(I(x,y,n) + '<=' + upper);
