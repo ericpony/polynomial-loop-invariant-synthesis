@@ -87,10 +87,9 @@ String.prototype.insertAt = function(str, index) {
     return this.substr(0, index) + str + this.substr(index);
 };
 
-/* Profiler and timer */
-var Profiling = {};
-var Counters = {};
-var Timer = {
+/* Profiler */
+var Timers = {}, Counters = {};
+var Profiler = {
     timers: {},
     tick: function(mark) { if(this.timers[mark]) this.stop(mark); else this.start(mark); },
     start: function(mark){ this.timers[mark] = process.hrtime(); },
@@ -98,7 +97,7 @@ var Timer = {
         if(!this.timers[mark]) throw 'Should start a timer before stopping it: ' + mark;
         var elapsed = process.hrtime(this.timers[mark]);
         elapsed = elapsed[0] + elapsed[1]*1e-9;
-        Profiling[mark] = (Profiling[mark] || 0) + elapsed;
+        Timers[mark] = (Timers[mark] || 0) + elapsed;
         this.timers[mark] = false;
     },
     reset: function(mark) { Counters[mark] = 0 },
@@ -205,9 +204,9 @@ function _verify_sample_(x,y,n) {
 
     if(!isInt(x) || !isInt(y) || !isInt(n)) return null;
 
-    Timer.tick('verify_sample');
+    Profiler.tick('verify_sample');
     var bounds = testcase.check(x,y,n,constraints);
-    Timer.tick('verify_sample');
+    Profiler.tick('verify_sample');
 
     if(!bounds) return null;
 
@@ -218,7 +217,7 @@ function _verify_sample_(x,y,n) {
 }
 
 function build_sample_space(lower, upper, num_vars, num_samples) {
-    Timer.tick('Building sample space');
+    Profiler.tick('Building sample space');
     var samples = [];
     var vars = [];
     (function uniform_sampling(i){
@@ -242,7 +241,7 @@ function build_sample_space(lower, upper, num_vars, num_samples) {
     samples = samples.sort(function(a,b){
         return (a.diff===undefined||b.diff===undefined) ? -(Math.abs(a.diff||b.diff)||1) :(a.diff-b.diff);
     });
-    Timer.tick('Building sample space');
+    Profiler.tick('Building sample space');
     return samples;
 }
 
@@ -336,7 +335,7 @@ function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample
     var times_to_try = Settings.max_num_basis_probe;
 
     while(times_to_try--) {
-        Timer.count('No. of basis searchs');
+        Profiler.count('No. of basis searchs');
         var weight  = _weight;
         var weights = _weights.slice(0);
         var points  = _points.slice(0);
@@ -366,7 +365,7 @@ function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample
 }
 
 function refine_constraint(coeff_list, constraint, constraints) {
-    Timer.tick('Guessing coefficients');
+    Profiler.tick('Guessing coefficients');
     num_refinement++;
     var z3_formula = constraint.replace(/ *and */g,',');
     z3_formula = "from z3 import *\n" + coeff_list.map(function(c){ return c + ' = Int(\'' + c + '\')'; }).join("\n")
@@ -375,7 +374,7 @@ function refine_constraint(coeff_list, constraint, constraints) {
     z3_formula += "s.check()\nprint s.model()";
 
     var result = sh.exec('echo "' + z3_formula + '" | tee z3.refine.log | python -').stdout;
-    Timer.tick('Guessing coefficients');
+    Profiler.tick('Guessing coefficients');
 
     // sat
     if(result[0]=='[') {
@@ -410,7 +409,7 @@ function build_template(num_samples, monomials, basis) {
 }
 
 function main() {
-    Timer.tick('Total execution time');
+    Profiler.tick('Total execution time');
 
     var args = process.argv.slice(2);
     var upper = Settings.lagrange.upper; // 3
@@ -512,14 +511,14 @@ function main() {
     log("All valid samples".bold, Verbose.INFORMATIVE+1);
 
     var result;
-    Timer.tick('Computing basis');
+    Profiler.tick('Computing basis');
     if(USE_STANDARD_BASIS)
         result = compute_standard_basis(num_samples, monomials, sample_space);
     else
         result = compute_lagrange_basis(degree, num_samples, monomials, skewness, sample_space);
 
     result[1].forEach(function(s){ log(pt_str(s.point) + ' ' + s.constraint) });
-    Timer.tick('Computing basis');
+    Profiler.tick('Computing basis');
 
     var basis   = result[0];
     var samples = result[1];
@@ -658,7 +657,7 @@ function main() {
 
         function test_point(point) {
             log(('Checking Point' + (j+1) + ': ').bold + '(' + point.cyan +') ...', Verbose.INFORMATIVE+1);
-            Timer.count('No. of random tests');
+            Profiler.count('No. of random tests');
 
             var new_constraint = 's.add(' + Node.to_z3_formula(parser(point))(rule) + ')';
             var ruleZ3 = new_constraint;
@@ -678,8 +677,8 @@ function main() {
             log('Point (' + point.cyan + ') ' + (passed? 'passed'.green : 'failed'.red), Verbose.INFORMATIVE);
             //log('Time for normalization: ' + Profiling['normalization'] + 's', Verbose.DEBUG);
             //log('Critical: ' + Profiling['symbolic'] + 's' + "\n", Verbose.DEBUG);
-            //Timer.reset('normalization');
-            //Timer.reset('symbolic');
+            //Profiler.reset('normalization');
+            //Profiler.reset('symbolic');
             return !passed ? new_constraint : null;
         }
 
@@ -831,7 +830,7 @@ function main() {
     }
 
     function verify_poly(coeff) {
-        Timer.tick('Quantifier elimination');
+        Profiler.tick('Quantifier elimination');
         log();
         log("Coefficients: ".bold + coeff);
         log("Pre-condition:  ".bold + pre);
@@ -951,10 +950,10 @@ function main() {
                   //point = sampler();
             }
             console.log('Add Cex to the sample space:'.bold + '(' + point.toString().yellow + ")\n");
-            Timer.tick('Quantifier elimination');
+            Profiler.tick('Quantifier elimination');
             return [false, point.join(' ')];
         }
-        Timer.tick('Quantifier elimination');
+        Profiler.tick('Quantifier elimination');
         return [true, undefined];
     }
     function simplify(expr) {
@@ -1044,7 +1043,7 @@ function main() {
                     }else {
                         token = $lcm + '*(' + token + ')';
                         //log("Token (before): ".bold + token, Verbose.DEBUG);
-                        //Timer.tick('symbolic');
+                        //Profiler.tick('symbolic');
                         switch(Settings.symbolic.evaluator) {
                             case 'python':
                                 token = token.replace(/\/(\d+)/g, '\/$1.0');
@@ -1065,7 +1064,7 @@ function main() {
                             default: throw 'Invalid mode: ' + Settings.symbolic.evaluator;
                         }
                         //log("Token (after): ".bold + token, Verbose.DEBUG);
-                        //Timer.tick('symbolic');
+                        //Profiler.tick('symbolic');
                     }
 
                     if(token!='0')
@@ -1107,9 +1106,9 @@ function main() {
                log("Guess: ".bold + coeff + "\n");
            }
            /* check if the guessed polynomial satisfies the rules at all sample points */
-           Timer.tick('Random tests');
+           Profiler.tick('Random tests');
            var result = USE_RANDOM_TESTS ? test_coeff(coeff, constraintsZ3) : [true];
-           Timer.tick('Random tests');
+           Profiler.tick('Random tests');
 
            // yes
            if(result[0]) {
@@ -1154,10 +1153,10 @@ function main() {
             result = 'Unknown'
         }
     }
-    Timer.tick('Total execution time');
+    Profiler.tick('Total execution time');
     console.error("\n"+"Profiling of ".bold + test_name.yellow.bold);
-    for(var mark in Profiling) {
-        console.error(mark + ":\t" + (Profiling[mark].toFixed(2) + 's').cyan);
+    for(var mark in Timers) {
+        console.error(mark + ":\t" + (Timers[mark].toFixed(2) + 's').cyan);
     }
     for(var mark in Counters) {
         console.error(mark + ":\t" + Counters[mark].toString().cyan);
