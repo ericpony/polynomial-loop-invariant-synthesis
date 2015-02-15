@@ -10,6 +10,7 @@ module.exports = {
          * Example: var=x,y,n 'pre=y*(2*n+1)' 'post=3*x' test=square-sum2 skew=.75
          */
         domain: 'x>=0 and y>=0 and n>=0',
+        filter: function(x,y,n) { return x>=0 && y>=0 && n>=0 },
         check: function(x,y,n,constraints) {
                    if(n<0 || x<0 || x<y) return null;
                    var lower = precond(x,y,n);

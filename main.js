@@ -3,7 +3,6 @@
 var fs = require('fs');
 var sh = require("execSync");
 var colors = require('colors');
-//var fraction = require('./fraction.js');
 
 var Verbose = {
     QUIET:      -1,
@@ -33,7 +32,8 @@ var Settings = {
     max_num_sample_verification: 100,
     verbose_level: 0,
 };
-var precond, postcond, testcase;
+var precond, postcond, testcase, num_refinement = 0;
+var USE_APPROX_ROUNDING = false; 
 
 function I(x, y, n) {
     if(n!==undefined)
@@ -47,7 +47,10 @@ function round(x, n) { return +x.toFixed(n ? n:5); }
 function isInt(x) { return (typeof x==='number' && (x%1)===0); }
 function gcd(a, b) { return b ? gcd(b, a % b) : a; }
 function lcm(a, b) { return !a||!b ? 0 : a*b/gcd(a,b); }
-
+function bool_val(val) {
+    var sval = val.toString().toLowerCase(); 
+    return (sval=='true'||sval=='yes'||sval=='1'||sval=='t') ? true : (sval=='false'||sval=='no'||sval=='0'||sval=='f') ? false : Boolean(val);
+}
 
 /* This is the multiply-with-carry (MWC) random generator with
  * a pretty long period. Adapted from Wikipedia, see
@@ -86,19 +89,20 @@ String.prototype.insertAt = function(str, index) {
 
 /* Profiler and timer */
 var Profiling = {};
+var Counters = {};
 var Timer = {
-    marks: {},
-    tick: function(marking) { // get interval from last tick in seconds
-        var now = process.hrtime()[0];
-        var last_tick = this.marks[marking] || now;
-        this.marks[marking] = now>last_tick ? 0 : now;
-        var elapsed = Profiling[marking];
-        Profiling[marking] = (elapsed ? elapsed : 0) + now - last_tick;
+    timers: {},
+    tick: function(mark) { if(this.timers[mark]) this.stop(mark); else this.start(mark); },
+    start: function(mark){ this.timers[mark] = process.hrtime(); },
+    stop:  function(mark){ 
+        if(!this.timers[mark]) throw 'Should start a timer before stopping it: ' + mark;
+        var elapsed = process.hrtime(this.timers[mark]);
+        elapsed = elapsed[0] + elapsed[1]*1e-9;
+        Profiling[mark] = (Profiling[mark] || 0) + elapsed;
+        this.timers[mark] = false;
     },
-    reset: function(marking) {
-        this.marks[marking] = undefined;
-        Profiling[marking] = 0;
-    }
+    reset: function(mark) { Counters[mark] = 0 },
+    count: function(mark) { Counters[mark] = (Counters[mark]||0) + 1 }
 };
 
 /* Definition of class Sample */
@@ -214,7 +218,7 @@ function _verify_sample_(x,y,n) {
 }
 
 function build_sample_space(lower, upper, num_vars, num_samples) {
-    Timer.tick('build_sample_space');
+    Timer.tick('Building sample space');
     var samples = [];
     var vars = [];
     (function uniform_sampling(i){
@@ -238,7 +242,7 @@ function build_sample_space(lower, upper, num_vars, num_samples) {
     samples = samples.sort(function(a,b){
         return (a.diff===undefined||b.diff===undefined) ? -(Math.abs(a.diff||b.diff)||1) :(a.diff-b.diff);
     });
-    Timer.tick('build_sample_space');
+    Timer.tick('Building sample space');
     return samples;
 }
 
@@ -254,18 +258,29 @@ function writeToFile(string, filename) {
     fs.closeSync(fd);
 }
 
-/** Random sampling according to weights.
- *
+function compute_standard_basis(num_samples, monomials, sample_space) {
+    var basis = [];
+    for(var i=0; i<monomials.length; i++)
+        for(var j=0; j<monomials.length; j++)
+            basis.push(i==j? 1 : 0);
+    var point_weights = sample_space.map(function(s,i){ 
+            return [i, s.point.split(' ').reduce(function(a,b){ return a+(b=='1'||b=='0'?0:1) }, 0)] 
+        }).sort(function(a,b){ return a[1] - b[1] });
+    var samples = [];
+    for(var i=0; i<num_samples; i++) samples.push(sample_space[point_weights[i][0]]);
+    return [basis, samples];
+}
+/** 
+ *  Compute a Lagrange basis by random sampling.
  *  Note that sample points are assumed to be integers.
  */
-function compute_lagrange(degree, num_samples, monomials, sample_space) {
+function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample_space) {
 
     var detVandermonde = 0;
     var N =  '[' + monomials.join('; ') + ']';
-    var num_vars = sample_space[0][0].split(' ').length;
+    var num_vars = sample_space[0].point.split(' ').length;
 
     function lagrange(samples) {
-        Timer.tick('compute_lagrange_basis');
         var S = '[' + samples.join('; ') + ']';
         var command = './lagrange.m "' + degree + '" "' + num_vars + '" "' + num_samples + '" "' + S + '" "' + N + '"';
         var basis = sh.exec(command + ' 2>/dev/null').stdout;
@@ -291,26 +306,39 @@ function compute_lagrange(degree, num_samples, monomials, sample_space) {
                 // It must be sign(b)==sign(b/a)
                 var n = b/a, m = detV/a;
                 if(m==1) return n;
-                return n + '/' + m;
+                var val = n + '/' + m;
+                if(!USE_APPROX_ROUNDING) return val;
+
+                val = round(eval(val), 3).toString();  
+                var dot = val.indexOf('.');
+                if(dot<0) return val;
+                var n_digits = val.length - dot - 1;
+                var base = '1';
+                while(n_digits-->0) base += '0';
+                val = val.replace('.','') + '/' + base;
+                return val[0]=='-' ? val.replace(/^\-0+/,'-') : val.replace(/^0+/,'');
             });
             //log("Basis\n".bold + basis, Verbose.INFORMATIVE);
             var result = basis;
         }else
             var result = null;
-        Timer.tick('compute_lagrange_basis');
         return result;
     }
-    Timer.tick('guess_lagrange_basis');
-    var _weight  = 0;
-    var _weights = sample_space.map(function(s){ return s[1] });
-    var _points  = sample_space.map(function(s){ return s[0] });
+    var point_weights = sample_space.map(function(s){
+            var weight = Math.pow(1-skewness, s.diff===undefined ? 1/(1-skewness) : s.diff);
+//            var weight = Math.pow(1-skewness, s.diff===undefined ? 1/(1-skewness)/(1-skewness) : s.diff);
+            log(pt_str(s.point) + ' ' + s.constraint + ' ' + round(weight,4).toString().cyan, Verbose.INFORMATIVE+1);
+            return [s.point, weight];
+        });
+    var _points  = point_weights.map(function(s){ return s[0] });
+    var _weights = point_weights.map(function(s){ return s[1] });
+    var _weight = _weights.reduce(function(a,b){ return a+b });
     var samples  = new Array(num_samples);
     var indices  = new Array(num_samples);
     var times_to_try = Settings.max_num_basis_probe;
 
-    _weights.forEach(function(w){ _weight += w; });
-
     while(times_to_try--) {
+        Timer.count('No. of basis searchs');
         var weight  = _weight;
         var weights = _weights.slice(0);
         var points  = _points.slice(0);
@@ -331,8 +359,8 @@ function compute_lagrange(degree, num_samples, monomials, sample_space) {
         var basis = lagrange(samples);
         if(basis){
             log("Rand\n".bold + '['+rands.join(',')+']', Verbose.INFORMATIVE);
-            Timer.tick('guess_lagrange_basis');
-            return [basis, indices];
+            samples = indices.map(function(i){ return sample_space[i] });
+            return [basis, samples];
         }
    }
    log(('[Error] Cannot find a valid sampling within ' + Settings.max_num_basis_probe + ' trials.').bold.red);
@@ -340,14 +368,18 @@ function compute_lagrange(degree, num_samples, monomials, sample_space) {
 }
 
 function refine_constraint(coeff_list, constraint, constraints) {
+    Timer.tick('Guessing coefficients');
+    num_refinement++;
     var z3_formula = constraint.replace(/ *and */g,',');
     z3_formula = "from z3 import *\n" + coeff_list.map(function(c){ return c + ' = Int(\'' + c + '\')'; }).join("\n")
                  + "\ns = Solver()\n\ns.add(And(" + z3_formula + "))\n\n";
     constraints.forEach(function(c){ z3_formula += c + "\n" });
     z3_formula += "s.check()\nprint s.model()";
-//    log("Z3 formula:\n".bold + z3_formula, Verbose.DEBUG);
 
     var result = sh.exec('echo "' + z3_formula + '" | tee z3.refine.log | python -').stdout;
+    //Timer.tick('Guessing coefficients');
+    Timer.tick('Guessing coefficients');
+
     // sat
     if(result[0]=='[') {
         result = '{' + result.substr(1, result.length-3).replace(/\n/g,'').replace(/ = /g,':') + '}';
@@ -357,7 +389,6 @@ function refine_constraint(coeff_list, constraint, constraints) {
     log("Z3 Error:\n".bold.red + result, Verbose.DEBUG);
     return '';
 }
-
 
 function build_template(num_samples, monomials, basis) {
     monomials = monomials.map(function(degs) {
@@ -382,7 +413,8 @@ function build_template(num_samples, monomials, basis) {
 }
 
 function main() {
-    Timer.tick('main');
+    Timer.tick('Total execution time');
+
     var args = process.argv.slice(2);
     var upper = Settings.lagrange.upper; // 3
     var lower = Settings.lagrange.lower; // 0
@@ -392,7 +424,9 @@ function main() {
     var degree = 2;
     var pre  = 'x*(y-x)';
     var post = 'n';
-    testcase = 'random-walk';
+    var USE_STANDARD_BASIS = false;
+    var USE_RANDOM_TESTS = true;
+    test_name = 'random-walk';
 
     for(var i=0; i<args.length; i++) {
         var arg = args[i].split('=');
@@ -405,12 +439,15 @@ function main() {
             case 'degree':      degree = +val;          break; // mandatory
             case 'var':     var_names = val.split(','); break; // mandatory
             case 'strategy':    search_strategy = val;  break;
-            case 'test':        testcase = val;         break;
+            case 'test':        test_name = val;         break;
             case 'lower':       lower = +val;           break;
             case 'upper':       upper = +val;           break;
             case 'skew':        skewness = +val;        break;
-            case 'verbose':     Settings.verbose_level = +val; break;
-            case 'theory':      Settings.redlog.theory = val;  break;
+            case 'apprx':       USE_APPROX_ROUNDING = bool_val(val);    break;
+            case 'rt':          USE_RANDOM_TESTS    = bool_val(val);    break;
+            case 'std':         USE_STANDARD_BASIS  = bool_val(val);    break;
+            case 'verbose':     Settings.verbose_level = +val;          break;
+            case 'theory':      Settings.redlog.theory = val;           break;
             default: continue;
         }
     }
@@ -419,7 +456,7 @@ function main() {
         return;
     }
  
-    var _testcase = require('./test-cases/' + testcase);
+    var _testcase = require('./test-cases/' + test_name);
     testcase = {};
     for(var name in _testcase){
         var definition = _testcase[name];
@@ -477,20 +514,25 @@ function main() {
 
     log("All valid samples".bold, Verbose.INFORMATIVE+1);
 
-    var result = compute_lagrange(degree, num_samples, monomials, sample_space.map(function(s){
-            var weight = Math.pow(1-skewness, s.diff===undefined ? 1/(1-skewness) : s.diff);
-            log(pt_str(s.point) + ' ' + s.constraint + ' ' + round(weight,4).toString().cyan, Verbose.INFORMATIVE+1);
-            return [s.point, weight];
-        }));
+    var result;
+    Timer.tick('Computing basis');
+    if(USE_STANDARD_BASIS)
+        result = compute_standard_basis(num_samples, monomials, sample_space);
+    else
+        result = compute_lagrange_basis(degree, num_samples, monomials, skewness, sample_space);
+
+    result[1].forEach(function(s){ log(pt_str(s.point) + ' ' + s.constraint) });
+    Timer.tick('Computing basis');
+
     var basis   = result[0];
-    var samples = result[1].map(function(i){ return sample_space[i] });
+    var samples = result[1];
     var points  = samples.map(function(s){ return s.point });
     //basis = basis.split("\n").slice(2);
 
     var template_terms = build_template(num_samples, monomials, basis);
     var template = template_terms.map(function(t,i){ return 'I_' + (i+1) + '_*(' + t + ')' }).join('+');
 
-//    log("Template terms\n".bold + template_terms.join("\n")); log("Template\n".bold + template); throw '';
+    //log("Template terms\n".bold + template_terms.join("\n")); log("Template\n".bold + template); throw '';
     
     log("Sampling\n".bold +'Points: (' + samples.map(function(s){ return s.point }).join('), (') + ')', Verbose.INFORMATIVE);
     if(Settings.verbose_level>=Verbose.INFORMATIVE)
@@ -498,11 +540,13 @@ function main() {
 
     log('Constraints'.bold, Verbose.INFORMATIVE);
 
-    var constraint = bounded_constraint = '(1==1)';
+    var constraint = bounded_constraint = '(I_1_==I_1_)';
+
+//for(var i=0; i<1; i++) {
 
     for(var i=0; i<samples.length; i++) {
         var s = samples[i];
-        log(s.point, s.constraint, Verbose.INFORMATIVE);
+        log(s.point.bold+' '+s.constraint, Verbose.INFORMATIVE);
         constraint += ' and ' + s.constraint;
         if(s.lower!==undefined && s.upper!==undefined)
             bounded_constraint += ' and ' + s.constraint;
@@ -511,24 +555,37 @@ function main() {
     var coeff_list = [];
 
     for(var i=0; i<samples.length; i++) {
-        var r = 'I\\[' + samples[i].point.split(' ').join(',') + '\\]';
+        var p = samples[i].point.split(' ');
+        var r = 'I\\[' + p.join(',') + '\\]';
         var c = 'I_' + (i+1) + '_';
-        constraint = constraint.replace(new RegExp(r,'g'), c);
+        constraint = constraint.replace(new RegExp(r,'g'), USE_STANDARD_BASIS ? evaluate_poly3(p, template) : c);
         coeff_list[i] = c;
     }
 
-    //log("Constraint before replacing free coeff:\n".bold + constraint, Verbose.INFORMATIVE);
+    log("Constraint before replacing free coeff:\n".bold + constraint, Verbose.INFORMATIVE);
 
+    if(USE_STANDARD_BASIS) {
+        constraint = constraint.replace(/I\[([^\]]+)\]/g, function(a,b) { return evaluate_poly3(b.split(','), template) });
+    }else {
+        constraint = constraint.replace(/I\[[^\]]+\]/g, function(a,b) { var cc = 'I_' + (coeff_list.length+1) + '_'; coeff_list.push(cc); return cc });
+    }
+    /*
     (function(free_coeffs){
         if(!free_coeffs) return;
         free_coeffs.map(function(c){
             var cc = 'I_' + (coeff_list.length+1) + '_';
             constraint = constraint.replace(new RegExp(c.replace(/([\[\]])/g,'\\$1'),'g'), cc);
-            coeff_list.push(cc);
+            coeff_list.push(cc);            
         });
     })(constraint.match(/I\[[^\]]+\]/g));
+    */
+    log("Constraint after replacing free coeff:\n".bold + constraint, Verbose.INFORMATIVE);
+    
+    //Solution for random-walk
+    //if(USE_STANDARD_BASIS)
+    //constraint += ' and I_2_==1 and I_10_==-1 and I_9_==1 and I_3_==0 and I_4_==0 and I_5_==0 and I_7_==0 and I_8_==0 and I_1_==0 and I_6_==0'; 
 
-    //log("Constraint after replacing free coeff:\n".bold + constraint, Verbose.INFORMATIVE);
+    //constraint = 'I_2_==1 and I_10_==-1 and I_9_==1 and I_3_==0 and I_4_==0 and I_5_==0 and I_7_==0 and I_8_==0 and I_1_==0 and I_6_==0'; 
 
     log("Basis\n".bold + basis, Verbose.INFORMATIVE);
     log("Coeff names\n".bold + coeff_list.map(function(n){ return n.substr(0,n.length-1) }), Verbose.INFORMATIVE);
@@ -541,161 +598,6 @@ function main() {
                    replace(/I[_\d]+/, '$&'.bold)
         }).join("\n"), Verbose.INFORMATIVE+1);
     log();
-
-    function test_coeff(coeff, constraints) {
-        Timer.tick('test_coeff');
-
-        /* the formula to be checked for validity by Z3 */
-        var z3_formula = "from z3 import *\n" + coeff_list.map(function(c){ return c + ' = Int(\'' + c + '\')' }).join("\n") + "\ns = Solver()\n\n";
-
-        function parser(point) {
-            var values = point.split(' ');
-            return function(rule0) {
-                /* replace program variables by values in the rules */
-                for(var i=0; i<var_names.length; i++)
-                    rule0 = rule0.replace(new RegExp(var_names[i], 'g'), values[i]);
-                // replace e.g. --2 by 2
-                rule0 = rule0.replace(/--/g,'');
-                log('Rule: ' + rule0, Verbose.INFORMATIVE+1);
-                var rule1 = rule0.replace(invariant_regex,
-                    function(a,b,c,d){
-                        var g = arguments;
-                        var args = var_names.reduce(function(args, j, i){ args.push(g[i+1]); return args; }, []);
-                        var poly_expr = evaluate_poly3(args, template);
-                        return '(' + poly_expr + ')'; // is an expression
-                    });
-                return normalize(coeff, rule1, false);
-            }
-        }// end of parser
-
-        function test_point(point) {
-            log(('Checking Point' + (j+1) + ': ').bold + '(' + point.cyan +') ...', Verbose.INFORMATIVE+1);
-            var new_constraint = 's.add(' + Node.to_z3_formula(parser(point))(rule) + ")\n";
-
-            var ruleZ3 = new_constraint;
-            for(var name in coeff)
-                ruleZ3 = ruleZ3.replace(new RegExp(name,'g'), coeff[name]);
-
-            //console.log("Rule:\n".bold + ruleZ3);
-            var z3_prog = z3_formula + ruleZ3 + "\n";
-            /* check if the formula (without free variables) is satisfiable */
-            //constraints.forEach(function(c){ z3_prog += c + "\n" });
-            z3_prog += "print s.check()";
-            var result = sh.exec('echo "' + z3_prog + '" | tee z3.qcheck.log | python -').stdout;
-            var passed = /^sat/.test(result);
-            // abort if Z3 outputs error messages
-            if(!passed && !/^unsat/.test(result)) throw result.bold.red;
-
-            log('Point (' + point.cyan + ') ' + (passed? 'passed'.green : 'failed'.red), Verbose.INFORMATIVE);
-            log('Time for normalization: ' + Profiling['normalization'] + 's', Verbose.DEBUG);
-            log('Critical: ' + Profiling['symbolic'] + 's' + "\n", Verbose.DEBUG);
-            Timer.reset('normalization');
-            Timer.reset('symbolic');
-            return !passed ? new_constraint : null;
-        }
-
-        var times_to_try = Settings.max_num_sample_verification;
-
-        /* check that the rules are not broken at all sample points */
-        while(times_to_try-->0) {
-            if(testcase.filter){
-                var vars = [];
-                var new_constraint = null;
-                (function uniform_sampling(i){
-                    if(new_constraint) return;
-                    for(var val=lower; val<=upper; val++) {
-                        vars[i] = val;
-                        if(i>=num_vars-1) {
-                            if(testcase.filter.apply(null, vars))
-                            {
-                                new_constraint = test_point(vars.join(' '));
-                                if(new_constraint) break;
-                            }
-                        }else
-                            uniform_sampling(i+1);
-                    }
-                })(0);
-                if(new_constraint) return [false, new_constraint];
-            }else {
-                for(var j = 0, N = sample_space.length; j<N; j++) {
-                    var new_constraint = test_point(sample_space[j].point);
-                    if(new_constraint) return [false, new_constraint];
-                }
-            }
-            Timer.tick('test_coeff');
-            log('========Succeeded!========='.green, Verbose.INFORMATIVE);
-
-            var replace_redlog_with_z3 = false;
-            if(replace_redlog_with_z3) {
-            var rule0 = 's.add(' + Node.to_z3_formula(function(expr){
-                log('Exp before substitution: '.bold.red + expr);
-//                expr = expr.replace(/I\(([^,]+),([^,]+),([^)]+)\)/g,
-                expr = expr.replace(invariant_regex,
-                    function(a,b,c,d) {
-                        var g = arguments;
-                        var args = var_names.reduce(function(args, j, i){ args.push(g[i+1]); return args; }, []);
-                        var poly_expr = evaluate_poly3(args, template);
-                        return '(' + poly_expr + ')'; // is an expression
-                    })
-                log('Exp after substitution: '.bold.red + expr);
-                expr = normalize(coeff, expr, true);
-//                expr = get_integral_z3_formula(coeff, expr);
-                log('Exp after eliminating fractions: '.bold.red + expr);
-                return expr;
-            })(NOT(rule)) + ")\n";
-
-            rule0 = bind_coeff(coeff, rule0);
-
-            console.log(rule0);
-            z3_prog = "from z3 import *\n" + var_names.map(function(name){ return name + " = Int('" + name + "')\n" }).join('');
-            z3_prog += "s = Solver()\n\n" + rule0
-                + "\nprint s.check()";
-//                + "\ns.check()\nprint s.model()";
-            var result = sh.exec('echo "' + z3_prog + '" | tee z3.cex.log | python -').stdout;
-
-            console.log(result);
-            // sat
-            if(result[0]=='[') {
-                result = '{' + result.substr(1, result.length-3).replace(/\n/g,'').replace(/ = /g,':') + '}';
-            }
-            throw "abort";
-            }
-            return [true, undefined];
-        }
-    }// end of test_coeff
-
-    function evaluate_poly1(valuation, poly) {
-        Timer.tick('evaluate_poly1');
-        for(var i=0; i<valuation.length; i++) {
-            poly = poly.replace(new RegExp('\\$'+(i+1), 'g'),'(' + valuation[i] + ')');
-        }
-        Timer.tick('evaluate_poly1');
-        return round(eval(poly), 10);
-    }
-
-    function evaluate_poly2(valuation) {
-        Timer.tick('evaluate_poly2');
-        var linear = [];
-        for(var j=0; j<template_terms.length; j++) {
-            var term = template_terms[j];
-            for(var i=0; i<var_names.length; i++) {
-                term = term.replace(new RegExp('\\$'+(i+1),'g'), '('+valuation[i]+')');
-            }
-            term = term.replace(/\^/g, '**');
-            linear[j] = 'I_' + (j+1) + '_*(' + term + ')';
-        }
-        Timer.tick('evaluate_poly2');
-        return linear.join('+').replace(/\+\-/g,'-');
-    }
-
-    function evaluate_poly3(valuation, template) {
-        //return evaluate_poly2(valuation);
-        for(var i=0; i<var_names.length; i++) {
-            template = template.replace(new RegExp('\\$'+(i+1),'g'), '('+valuation[i]+')');
-        }
-        template = template.replace(/\+\-/g,'-').replace(/\^/g, '**');
-        return template;
-    }
 
     function bind_coeff(coeff, expr) {
         for(var name in coeff) {
@@ -713,6 +615,144 @@ function main() {
         }
         return expr;
     }
+
+    function mk_symbolic(formula) { 
+        return formula.replace(/(-?[0-9]+\/[\.0-9]+)/g, 'RealVal(\'$1\')') 
+    }
+
+    function find_right_paren_pos(str, start) {
+        if(str[start]!='(') return str;
+        var c = 1, ptr = start+1;
+        while(c>0 && ptr<str.length) {
+            switch(str[ptr]){
+                case '(': c++; break;
+                case ')': c--; break;
+            }
+            ptr++;
+        }
+        return ptr - 1;
+    }
+
+    function template_to_string(coeff, var_names, template) {
+        var _z3_prog_header = "from z3 import *\n" + var_names.map(function(name){ 
+            return name + " = Real('" + name + "')\n" 
+        }).join('') + "s = Solver()\n";
+        var _z3_prog = mk_symbolic(bind_coeff(coeff, template.replace(/\$(\d+)/g, 
+            function(a,i){ return var_names[i-1] }
+        )));
+        _z3_prog = _z3_prog_header + 'print simplify(' + _z3_prog + ')';
+        var poly = require("execSync").exec('echo "' + _z3_prog + '" | python -').stdout;
+        return poly.replace(/(-?\d+\/\d+)/g, '($1)').replace(/\n/g, ' ').replace(/\*\*/g,'^');
+    }
+
+    function test_coeff(coeff, constraints) {
+        /* the formula to be checked for validity by Z3 */
+        var z3_formula = "from z3 import *\n" + coeff_list.map(function(c){ return c + ' = Int(\'' + c + '\')' }).join("\n") + "\ns = Solver()\n\n";
+
+        function parser(point) {
+            var values = point.split(' ');
+            return function(rule0) {
+                /* replace program variables by values in the rules */
+                for(var i=0; i<var_names.length; i++)
+                    rule0 = rule0.replace(new RegExp(var_names[i], 'g'), values[i]);
+                // replace e.g. --2 by 2
+                rule0 = rule0.replace(/--/g,'');
+                log('Rule: ' + rule0, Verbose.INFORMATIVE+1);
+                var rule1 = rule0.replace(invariant_regex,
+                    function(a,b,c,d){
+                        var g = arguments;
+                        var args = var_names.reduce(function(args, j, i){ args.push(g[i+1]); return args; }, []);
+                        var poly_expr = evaluate_poly3(args, template);
+                        return poly_expr; // is an expression
+                    });
+                return normalize(coeff, rule1, false);
+            }
+        }// end of parser
+
+        function test_point(point) {
+            log(('Checking Point' + (j+1) + ': ').bold + '(' + point.cyan +') ...', Verbose.INFORMATIVE+1);
+            Timer.count('No. of random tests');
+
+            var new_constraint = 's.add(' + Node.to_z3_formula(parser(point))(rule) + ')';
+            var ruleZ3 = new_constraint;
+            for(var name in coeff)
+                ruleZ3 = ruleZ3.replace(new RegExp(name,'g'), coeff[name]);
+
+            //console.log("Rule:\n".bold + ruleZ3);
+            var z3_prog = "from z3 import *\ns = Solver()\n" + ruleZ3 + "\n";
+            /* check if the formula (without free variables) is satisfiable */
+            //constraints.forEach(function(c){ z3_prog += c + "\n" });
+            z3_prog += "print s.check()";
+            var result = sh.exec('echo "' + z3_prog + '" | tee z3.qcheck.log | python -').stdout;
+            var passed = /^sat/.test(result);
+            // abort if Z3 outputs error messages
+            if(!passed && !/^unsat/.test(result)) throw result.bold.red;
+
+            log('Point (' + point.cyan + ') ' + (passed? 'passed'.green : 'failed'.red), Verbose.INFORMATIVE);
+            //log('Time for normalization: ' + Profiling['normalization'] + 's', Verbose.DEBUG);
+            //log('Critical: ' + Profiling['symbolic'] + 's' + "\n", Verbose.DEBUG);
+            //Timer.reset('normalization');
+            //Timer.reset('symbolic');
+            return !passed ? new_constraint : null;
+        }
+
+        /* check that the rules are not broken at all sample points */
+        if(testcase.filter){
+            var vars = [];
+            var new_constraint = null;
+            (function uniform_sampling(i){
+                if(new_constraint) return;
+                for(var val=lower; val<=upper; val++) {
+                    vars[i] = val;
+                    if(i>=num_vars-1) {
+                        if(testcase.filter.apply(null, vars))
+                        {
+                            new_constraint = test_point(vars.join(' '));
+                            if(new_constraint) break;
+                        }
+                    }else
+                        uniform_sampling(i+1);
+                }
+            })(0);
+            if(new_constraint) return [false, new_constraint];
+        }else {
+            for(var j = 0, N = sample_space.length; j<N; j++) {
+                var new_constraint = test_point(sample_space[j].point);
+                if(new_constraint) return [false, new_constraint];
+            }
+        }
+        log('========Succeeded!========='.green, Verbose.INFORMATIVE);
+        return [true, undefined];
+    }// end of test_coeff
+
+    function evaluate_poly1(valuation, poly) {
+        for(var i=0; i<valuation.length; i++) {
+            poly = poly.replace(new RegExp('\\$'+(i+1), 'g'),'(' + valuation[i] + ')');
+        }
+        return round(eval(poly), 10);
+    }
+
+    function evaluate_poly2(valuation) {
+        var linear = [];
+        for(var j=0; j<template_terms.length; j++) {
+            var term = template_terms[j];
+            for(var i=0; i<var_names.length; i++) {
+                term = term.replace(new RegExp('\\$'+(i+1),'g'), '('+valuation[i]+')');
+            }
+            term = term.replace(/\^/g, '**');
+            linear[j] = 'I_' + (j+1) + '_*(' + term + ')';
+        }
+        return '(' + linear.join('+').replace(/\+\-/g,'-') + ')';
+    }
+
+    function evaluate_poly3(valuation, template) {
+        //return evaluate_poly2(valuation);
+        for(var i=0; i<var_names.length; i++) {
+            template = template.replace(new RegExp('\\$'+(i+1),'g'), '('+valuation[i]+')');
+        }
+        return '(' + template.replace(/\+\-/g,'-').replace(/\^/g, '**') + ')';
+    }
+
     /* eliminate denominator of numbers in formula */
     function get_integral_z3_formula(coeff, expr, op){
         if(!op) {
@@ -804,7 +844,7 @@ function main() {
     }
 
     function verify_poly(coeff) {
-        Timer.tick('verify_poly');
+        Timer.tick('Quantifier elimination');
         log();
         log("Coefficients: ".bold + coeff);
         log("Pre-condition:  ".bold + pre);
@@ -837,13 +877,12 @@ function main() {
         //redlog = redlog.replace(/\+0/g,''); // remove "+0+0...+0" substring
 
         var command = "echo '" + redlog + "' | tee solver.log | ./reduce";
+        result = sh.exec(command).stdout;        
 
-        result = sh.exec(command).stdout;
         log();
         log("Redlog code\n".bold + redlog, Verbose.INFORMATIVE);
         log("Polynomial\n".bold + template1, Verbose.INFORMATIVE);
         log("Result\n".bold + result);
-        Timer.tick('verify_poly');
 
         if(/:= false/.test(result) || !/:= true/.test(result)) {
             var cex = 'load_package redlog; rlset ' + Settings.redlog.theory + '; find_cex := ex(x, ex(y, ex(n, (' + testcase.domain + ')';
@@ -888,10 +927,10 @@ function main() {
                  * Transforming e.g. 3*x  to 3*x**2
                  */
                 for(var i=aa; i<bb; i++) {
-                    if(!/^  *2/.test(lines[i])) continue;
+                    if(!/^  *\d/.test(lines[i]) || /[^\d ]/.test(lines[i])) continue;
                     for(var k=0,shift=0; k<lines[i].length; k++){
-                        if(lines[i][k]!=2) continue;
-                        lines[i+1] = lines[i+1].insertAt('**2',k+shift);
+                        if(!/\d/.test(lines[i][k])) continue;
+                        lines[i+1] = lines[i+1].insertAt('**'+lines[i][k],k+shift);
                         shift += 3;
                     }
                    lines[i] = '';
@@ -914,35 +953,23 @@ function main() {
                         point.forEach(function(p,i){ point[i] = p ? p : 0 });
                     }else {
                         console.log("\n"+'[Warning] Z3 cannot resolve a counter-example '.bold +"(check z3.cex.log for details):\n" + result);
-                        throw 'Program aborted.';
+                        return [undefined, undefined]
                     }
                 }
             }
             if(!point) {
                   //var sampler = testcase.sampler;
                   console.log('[Error] Invalid counter example.'.bold);
-                  throw 'Program aborted.';
+                  return [undefined, undefined]
                   //point = sampler();
             }
             console.log('Add Cex to the sample space:'.bold + '(' + point.toString().yellow + ")\n");
+            Timer.tick('Quantifier elimination');
             return [false, point.join(' ')];
         }
+        Timer.tick('Quantifier elimination');
         return [true, undefined];
     }
-
-    function find_right_paren_pos(str, start) {
-        if(str[start]!='(') return str;
-        var c = 1, ptr = start+1;
-        while(c>0 && ptr<str.length) {
-            switch(str[ptr]){
-                case '(': c++; break;
-                case ')': c--; break;
-            }
-            ptr++;
-        }
-        return ptr - 1;
-    }
-
     function simplify(expr) {
         /* substitute all sub-expression by thir values, e.g., (1+2) by 3 */
         var expr1 = '';
@@ -966,8 +993,6 @@ function main() {
             return expr;
         }
         if(expr.indexOf(op)==-1) return '';
-
-        Timer.tick('normalization');
 
         log("EXPR (before): ".bold + expr, Verbose.DEBUG);
 
@@ -1032,7 +1057,7 @@ function main() {
                     }else {
                         token = $lcm + '*(' + token + ')';
                         //log("Token (before): ".bold + token, Verbose.DEBUG);
-                        Timer.tick('symbolic');
+                        //Timer.tick('symbolic');
                         switch(Settings.symbolic.evaluator) {
                             case 'python':
                                 token = token.replace(/\/(\d+)/g, '\/$1.0');
@@ -1053,7 +1078,7 @@ function main() {
                             default: throw 'Invalid mode: ' + Settings.symbolic.evaluator;
                         }
                         //log("Token (after): ".bold + token, Verbose.DEBUG);
-                        Timer.tick('symbolic');
+                        //Timer.tick('symbolic');
                     }
 
                     if(token!='0')
@@ -1075,13 +1100,11 @@ function main() {
             var rhs = reduce(sides[1]);
             expr = lhs + op + rhs;
         }
-        Timer.tick('normalization');
         log("EXPR (after): ".bold + expr + "\n", Verbose.DEBUG);
         return expr;
     }
 
    var guess_invariant = function() {
-       Timer.tick('guess_invariant');
        var coeff = null;
        var constraintsZ3 = [];
        var times_to_try = Settings.max_num_sample_verification;
@@ -1092,16 +1115,20 @@ function main() {
                if(!new_coeff) return false;
 
                eval('coeff = ' + new_coeff);
+               //console.log('New coeff: '.bold + new_coeff.toString().bold);
+               coeff_list.map(function(c){ if(!coeff[c]) coeff[c] = 0; });
                log("Guess: ".bold + coeff + "\n");
            }
            /* check if the guessed polynomial satisfies the rules at all sample points */
-           var result = test_coeff(coeff, constraintsZ3);
+           Timer.tick('Random tests');
+           var result = USE_RANDOM_TESTS ? test_coeff(coeff, constraintsZ3) : [true];
+           Timer.tick('Random tests');
 
            // yes
            if(result[0]) {
                result = verify_poly(coeff);
-               if(result[0]) return true;
-               if(!result[1]) return false;
+               if(result[0]) return coeff;          // invariant found; return coeff 
+               if(!result[1]) return result[0];     // invariant doesn't exist
                sample_space.unshift({point: result[1], toString: Sample.prototype.toString});
                //log("Sample space: ".bold + sample_space.map(function(s){ return s.toString() }).join(','));
                continue;
@@ -1116,24 +1143,42 @@ function main() {
            constraintsZ3.push(new_constraint);
            coeff = null;
        }
-       Timer.tick('guess_invariant');
+       return undefined;    // cannot find an invariant
    };
 
+    var result = guess_invariant();
+    pre  = pre.substr(1,pre.length-2);
+    post = post.substr(1,post.length-2);
 
-    if(guess_invariant())
+    if(result) {
         log("\n"+'Invariant has been proved successfully.'.yellow.bold);
-    else {
+        result = template_to_string(result, var_names, template.replace(/\^/g,'**'));
+        //result = sh.exec("echo 'load_package redlog; rlset " + Settings.redlog.theory + "; poly := " + result + ";' | ./reduce | grep poly | grep -o '(.*>' | sed 's/[(>]//g' | sed 's/  /^2 /g'").stdout;
+    }else {
         log();
         log("Pre-condition:  ".bold + pre);
         log("Post-condition: ".bold + post);
         log("Rules:\t".bold + ruleRL);
-        log("\n"+'Failed to prove invariant.'.bold.red);
+        if(result===false) {
+            log("\n" + "Invariant does not exists.".bold.red);
+            result = 'None';
+        }else {
+            log("\n"+'Failed to prove invariant.'.bold.red);
+            result = 'Unknown'
+        }
     }
-    Timer.tick('main');
-    log("\n"+"Profiling:".bold);
+    Timer.tick('Total execution time');
+    console.error("\n"+"Profiling of ".bold + test_name.yellow.bold);
     for(var mark in Profiling) {
-        log(mark + ":\t" + (Profiling[mark] + 's').cyan);
+        console.error(mark + ":\t" + (Profiling[mark].toFixed(2) + 's').cyan);
     }
+    for(var mark in Counters) {
+        console.error(mark + ":\t" + Counters[mark].toString().cyan);
+    }
+    console.error('No. of refinements:\t' + num_refinement.toString().cyan); 
+    console.error('Pre-expectation:\t' + pre); 
+    console.error('Post-expectation:\t' + post); 
+    console.error("Invariant:\t\t" + result.cyan);
     return;
 }
 
