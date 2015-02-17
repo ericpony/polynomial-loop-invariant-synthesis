@@ -6,9 +6,6 @@ module.exports = {
          * Rule: pre-condition <= I(x,y,n)
          *       n>0  impl 2*I(x,y,n) <= I(x+y,y,n-1)+I(x,y,n-1)
          *       n<=0 impl I(x,y,n) <= post-condition
-         *
-         * Example: var=x,y,n 'pre=n*y' 'post=2*x' test=binomial skew=.65
-         * Example: var=x,y,n 'pre=n*y' 'post=(2*x-n*y)*(2*x-n*y)' test=binomial skew=.65
          */
         domain: 'x>=0 and y>=0 and n>=0',
         check: function(x,y,n,constraints) {
