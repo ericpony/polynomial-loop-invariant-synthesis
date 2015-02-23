@@ -6,24 +6,28 @@ var Verbose = {
     QUIET:      -1,
     NORMAL:      0,
     INFORMATIVE: 1,
-    DEBUG:       10,
+    DEBUG:       10
 };
 var Settings = {
     /**
-     * The constraints with either 'pasf' (Presburg arithematics)
-     * or 'ofsf' (an approximation of real number arithematics)
+     * The theory in which quantifier elimination is performed. 
+     * The value can be either 'pasf' (Presburg arithematics) 
+     * or 'ofsf' (an approximation of real number arithematics).
      */
     redlog: { theory: 'ofsf' },
     /**
-     * Skewness determines how the sample points are chosen.
+     * Lower and upper set the bounds of sampling points.
+     * Skewness determines how the sampling points are chosen.
      * When skewness = 1, sampling are made uniformly from the sample space.
-     * As skewness approaches zero, the result of sampling is more
-     * likely to be a favorable one. However, this comes at the cost of
-     * longer sampling time and the risk of failing the sampling process.
+     * As skewness approaches zero, the result of sampling tends to
+     * determine more constraints. However, the benefit comes at the cost of
+     * longer sampling time and lower possibility to spot a Lagrange basis
+     * in a given timeout.
      */
     lagrange: { lower: 0, upper: 3, skewness: .65 },
     /**
-     * Three evaluators available: 'mathomatic', 'javascript',  'python'
+     * Currently, three evaluators of numerical expressions 
+     * are supported: 'mathomatic', 'javascript', and 'python'.
      */
     symbolic: { evaluator: 'javascript' },
     max_num_basis_probe: 500,
@@ -50,7 +54,8 @@ function bool_val(val) {
     return (sval=='true'||sval=='yes'||sval=='1'||sval=='t') ? true : (sval=='false'||sval=='no'||sval=='0'||sval=='f') ? false : Boolean(val);
 }
 
-/* This is the multiply-with-carry (MWC) random generator with
+/** 
+ * This is the multiply-with-carry (MWC) random generator with
  * a pretty long period. Adapted from Wikipedia, see
  * http://en.wikipedia.org/wiki/Random_number_generation#Computational_methods
  */
@@ -58,18 +63,18 @@ Math.seed = function(s) { // Takes any integer
     var m_w = s;
     var m_z = 987654321;
     var mask = 0xffffffff;
-    return function()
-    // Returns number between 0 (inclusive) and 1.0 (exclusive),
-    // just like Math.random().
-    {
+    return function() {
         m_z = (36969 * (m_z & 65535) + (m_z >> 16)) & mask;
         m_w = (18000 * (m_w & 65535) + (m_w >> 16)) & mask;
         var result = ((m_z << 16) + m_w) & mask;
         result /= 4294967296;
+        // return a number between 0 (inclusive) and 1.0 (exclusive),
+        // just like Math.random() does.
         return result + 0.5;
     }
 }
 
+// use a fixed seed
 Math.random = Math.seed(Math.round(Math.seed(42)()*10000));
 
 Object.prototype.toString = function() {
@@ -102,7 +107,7 @@ var Profiler = {
     count: function(mark) { Counters[mark] = (Counters[mark]||0) + 1 }
 };
 
-/* Definition of class Sample */
+/* Sample class */
 var Sample = function(point, lowerbound, upperbound, constraints) {
     this.point = point;
     this.diff  = (upperbound!==undefined && lowerbound!==undefined) ? upperbound-lowerbound : undefined;
@@ -114,6 +119,7 @@ Sample.prototype.toString = function () {
     return '(' + this.point + ')';
 }
 
+/* Node class */
 var Node = function() {
     var nodes = [];
     for(var i=0; i<arguments.length; i++) nodes.push(arguments[i]);
@@ -132,6 +138,9 @@ Node.create = function(name) {
     };
     return subclass;
 }
+
+// make Node an algebraic data type
+var Not = Node.create('Not'), And = Node.create('And'), Or = Node.create('Or'), Imp = Node.create('Imp');
 
 Node.to_z3_formula = function(string_parser) {
     return function parse(node) {
@@ -183,8 +192,6 @@ Node.to_redlog_formula = function(string_parser) {
 }
 Node.prototype.toString = function() { return this.name + '(' + this.children + ')' }
 
-var Not = Node.create('Not'), And = Node.create('And'), Or = Node.create('Or'), Imp = Node.create('Imp');
-
 function verify_sample(vars) {
     vars.push([]);
     var bounds = testcase.check.apply(null, vars);
@@ -197,7 +204,7 @@ function verify_sample(vars) {
     return new Sample(vars.join(' '), lower, upper, constraints);
 }
 
-function _verify_sample_(x,y,n) {
+function verify_sample_v0(x,y,n) {
     var constraints = [];
 
     if(!isInt(x) || !isInt(y) || !isInt(n)) return null;
@@ -229,7 +236,6 @@ function build_sample_space(lower, upper, num_vars, num_samples) {
                 uniform_sampling(i+1);
         }
     })(0);
-
     if(samples.length<num_samples) {
         console.log(('[Error] Unable to build large enough sample space: '
                     + samples.length + ' probed, ' + num_samples + ' needed.').bold);
@@ -269,7 +275,7 @@ function compute_standard_basis(num_samples, monomials, sample_space) {
 }
 /**
  *  Compute a Lagrange basis by random sampling.
- *  Note that sample points are assumed to be integers.
+ *  Note that sampling points are assumed to be integers.
  */
 function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample_space) {
 
@@ -337,7 +343,7 @@ function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample
         var weight  = _weight;
         var weights = _weights.slice(0);
         var points  = _points.slice(0);
-        var _indices = weights.map(function(a,i){return i});
+        var _indices = weights.map(function(a,i){ return i });
         var rands = [];
         for(var i=0; i<samples.length; i++) {
             var rand = Math.random();
@@ -679,7 +685,7 @@ function main() {
             return !passed ? new_constraint : null;
         }
 
-        /* check that the rules are not broken at all sample points */
+        /* check that the rules are not broken at all sampling points */
         if(testcase.filter) {
             var vars = [];
             var new_constraint = null;
@@ -1098,7 +1104,7 @@ function main() {
                coeff_list.map(function(c){ if(!coeff[c]) coeff[c] = 0; });
                log("Guess: ".bold + coeff + "\n");
            }
-           /* check if the guessed polynomial satisfies the rules at all sample points */
+           /* check if the guessed polynomial satisfies the rules at all sampling points */
            Profiler.tick('Random tests');
            var result = USE_RANDOM_TESTS ? test_coeff(coeff, constraintsZ3) : [true];
            Profiler.tick('Random tests');
