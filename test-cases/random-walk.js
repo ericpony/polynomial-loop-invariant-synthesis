@@ -1,11 +1,11 @@
 module.exports = {
     /**
      * Program: n=0; while(0<x && x<y) { (x++)[p](x--); n++; }
-     * Domain:  x>=0, y>=x, n>=0
-     * Param:   p=0.5
-     * Rule: pre-condition <= I(x,y,n)
-     *       0<x and x<y impl 2*I(x,y,n)<=I(x-1,y,n+1)+I(x+1,y,n+1)
-     *       x==0 or x==y impl I(x,y,n) <= post-condition
+     * Domain:  x ≥ 0, y ≥ x, n ≥ 0
+     * Param:   p = 0.5
+     * Rule: pre-condition ≤ I(x,y,n)
+     *       0<x and x<y impl 2*I(x,y,n) ≤ I(x-1,y,n+1) + I(x+1,y,n+1)
+     *       x==0 or x==y impl I(x,y,n) ≤ post-condition
      */
     domain: '0<=x<=y and n>=0',
     check: function(x,y,n,constraints) {
