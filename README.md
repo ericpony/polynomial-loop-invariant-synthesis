@@ -1,5 +1,5 @@
 # Polynomial loop invariant synthesis
-This node.js script tries to verify a simple loop (written in [pCGL](http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.42.1798)) annotated with a pre-expectation and a post-expectation. You will need node.js with ver ≥ 0.10 to run this script. Besides, the following tools must be accessible in the shell:
+This node.js script tries to verify a flat probabilistic while-loop (written in [pCGL](http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.42.1798)) annotated with a pre-expectation and a post-expectation. You will need node.js with ver ≥ 0.10 to run this script. Besides, the following tools must be accessible in the shell:
 * GNU Octave
 * Redlog
 * Z3py
