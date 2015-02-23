@@ -6,6 +6,8 @@ This node.js script tries to verify a simple loop (written in [pCGL](http://cite
 
 ## Example
 
-The following code generates a polynomial loop invariant for the random walk example (in folder `test-cases`) with degree ≤ 2 and program variables x, y and n. The existence of loop invariant verifies that when the loop terminates, the expected value of variable n is no less than the value of the expression x*(y-x) evaluated right before the loop.
+The following command generates a polynomial loop invariant for the random walk example (see `random-walk.js` in folder `test-cases`) with degree ≤ 2 and variables `x`, `y` and `n`. In this case, the existence of loop invariant asserts that when the loop terminates, the expected value of program variable `n` is no less than the value of the expression `x*(y-x)` evaluated before the loop is entered and after the variables are initialized. 
 
     node ./main.js var=x,y,n deg=2 'pre=x*(y-x)' post=n test=random-walk
+
+Note that this script doesn't check the termination of the test case. The output of the script is meaningful only if the loop terminates almost surely, which has to be verified manually.
