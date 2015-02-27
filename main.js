@@ -10,24 +10,26 @@ var Verbose = {
 };
 var Settings = {
     /**
-     * The theory in which quantifier elimination is performed. 
+     * Set the theory in which quantifier elimination is performed.
      * The value can be either 'pasf' (Presburg arithematics) 
-     * or 'ofsf' (an approximation of real number arithematics).
+     * or 'ofsf' (approximation of real number arithematics).
      */
     redlog: { theory: 'ofsf' },
     /**
-     * Lower and upper set the bounds of sampling points.
-     * Skewness determines how the sampling points are chosen.
+     * lower: lowerbound of the sampling points
+     * upper: upperbound of the sampling points
+     * skewness: parameter to weight the sampling points
      * When skewness = 1, sampling are made uniformly from the sample space.
-     * As skewness approaches zero, the result of sampling tends to
+     * As skewness approaches zero, the result of the sampling tends to
      * determine more constraints. However, the benefit comes at the cost of
      * longer sampling time and lower possibility to spot a Lagrange basis
      * in a given timeout.
      */
     lagrange: { lower: 0, upper: 3, skewness: .65 },
     /**
-     * Currently, three evaluators of numerical expressions 
-     * are supported: 'mathomatic', 'javascript', and 'python'.
+     * Set the evaluators of numerical expressions.
+     * Currently, three evaluators are supported: 
+     * 'mathomatic', 'javascript', and 'python'.
      */
     symbolic: { evaluator: 'javascript' },
     max_num_basis_probe: 500,
@@ -139,7 +141,7 @@ Node.create = function(name) {
     return subclass;
 }
 
-// make Node an algebraic data type
+// make subclasses of Node behave like algebraic data types
 var Not = Node.create('Not'), And = Node.create('And'), Or = Node.create('Or'), Imp = Node.create('Imp');
 
 Node.to_z3_formula = function(string_parser) {
