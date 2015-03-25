@@ -1,6 +1,7 @@
 var fs = require('fs');
 var sh = require("execSync");
 var colors = require('colors');
+var tripwire = require('tripwire');
 
 var Verbose = {
     QUIET:      -1,
@@ -32,7 +33,6 @@ var Settings = {
      * 'mathomatic', 'javascript', and 'python'.
      */
     symbolic: { evaluator: 'javascript' },
-    max_num_basis_probe: 500,
     max_num_sample_verification: 100,
     verbose_level: 0,
 };
@@ -46,11 +46,11 @@ function I(x, y, n) {
         return 'I[' + x + ',' + y + ']';
     return 'I[' + x + ']';
 }
-function pt_str(pt) { return '[' + pt.split(' ').map(function(p){ return +p>=0 ? ' '+p : p }).join(' ') + ' ]' }
+function pt_str(pt)  { return '[' + pt.split(' ').map(function(p){ return +p>=0 ? ' '+p : p }).join(' ') + ' ]' }
 function round(x, n) { return +x.toFixed(n ? n:5); }
-function isInt(x) { return (typeof x==='number' && (x%1)===0); }
-function gcd(a, b) { return b ? gcd(b, a % b) : a; }
-function lcm(a, b) { return !a||!b ? 0 : a*b/gcd(a,b); }
+function isInt(x)    { return (typeof x==='number' && (x%1)===0); }
+function gcd(a, b)   { return b ? gcd(b, a % b) : a; }
+function lcm(a, b)   { return !a||!b ? 0 : a*b/gcd(a,b); }
 function bool_val(val) {
     var sval = val.toString().toLowerCase();
     return (sval=='true'||sval=='yes'||sval=='1'||sval=='t') ? true : (sval=='false'||sval=='no'||sval=='0'||sval=='f') ? false : Boolean(val);
@@ -93,31 +93,51 @@ String.prototype.insertAt = function(str, index) {
 };
 
 /* Profiler */
-var Timers = {}, Counters = {};
-var Profiler = {
-    timers: {},
-    tick:  function(mark) {
-        if(this.timers[mark]) this.stop(mark); else this.start(mark);
-    },
-    start: function(mark) {
-        this.timers[mark] = process.hrtime();
-    },
-    stop:  function(mark) {
-        if(!this.timers[mark]) throw 'Should start a timer before stopping it: ' + mark;
-        var elapsed = process.hrtime(this.timers[mark]);
-        elapsed = elapsed[0] + elapsed[1]*1e-9;
-        Timers[mark] = (Timers[mark] || 0) + elapsed;
-        this.timers[mark] = false;
-    },
-    count: function(mark) {
-        Counters[mark] = (Counters[mark]||0) + 1
-    },
-    reset: function() {
-        this.timers = {};
-        Timers = {};
-        Counters = {};
-    }
-};
+var Profiler = (function() {
+    var _timers = {};
+    return {
+        timeout:   0,
+        timers:   {},
+        counters: {},
+        tick:  function(mark) {
+            if(_timers[mark]) this.stop(mark); else this.start(mark);
+        },
+        start: function(mark) {
+            _timers[mark] = process.hrtime();
+        },
+        stop:  function(mark) {
+            var elapsed_time = this.time(mark);
+            this.timers[mark] = (this.timers[mark] || 0) + elapsed_time;
+            _timers[mark] = false;
+        },
+        time:  function(mark) {
+            if(!_timers[mark]) throw new Error('Should start the timer first: "' + mark + '"');
+            var elapsed = process.hrtime(_timers[mark]);
+            elapsed = elapsed[0] + elapsed[1]*1e-9;
+            return elapsed;
+        },
+        count: function(mark) {
+            this.counters[mark] = (this.counters[mark]||0) + 1
+        },
+        reset: function(timeout) {
+            _timers = {};
+            this.timeout = timeout;
+            this.timers = {};
+            this.counters = {};
+        },
+        exec:  function(command) {
+            var max_exec_time = (this.timeout - this.time('Total execution time')).toFixed(2);
+            if(max_exec_time<=0) throw 'timeout';
+            //log(('Time remains: ' + max_exec_time).yellow);
+            var command = 'timeout ' + max_exec_time + 's ' + command;
+            var res = sh.exec(command);
+            if(res.code==124) // timeout
+                throw 'timeout';
+            else
+                return res.stdout; 
+        }
+    };
+})();
 
 /* Sample class */
 var Sample = function(point, lowerbound, upperbound, constraints) {
@@ -298,7 +318,7 @@ function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample
     function lagrange(samples) {
         var S = '[' + samples.join('; ') + ']';
         var command = './lagrange.m "' + degree + '" "' + num_vars + '" "' + num_samples + '" "' + S + '" "' + N + '"';
-        var basis = sh.exec(command + ' 2>/dev/null').stdout;
+        var basis = Profiler.exec(command + ' 2>/dev/null');
         if(!/^singular/.test(basis)) {
             basis = basis.split(/ +/);
             detVandermonde = +basis.shift(); // determinant of the Vandermonde matrix
@@ -306,7 +326,7 @@ function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample
             if(isNaN(detVandermonde) || !detVandermonde || basis.length != num_samples*num_samples) {
                 log("Basis\n".bold + basis);
                 log("Command\n".bold + command);
-                log("Result\n".bold + sh.exec(command).stdout);
+                log("Result\n".bold + Profiler.exec(command));
                 throw 'Invalid Lagrange basis!';
             }
 
@@ -348,9 +368,8 @@ function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample
     var _weight = _weights.reduce(function(a,b){ return a+b });
     var samples  = new Array(num_samples);
     var indices  = new Array(num_samples);
-    var times_to_try = Settings.max_num_basis_probe;
 
-    while(times_to_try--) {
+    while(true) {
         Profiler.count('No. of basis searchs');
         var weight  = _weight;
         var weights = _weights.slice(0);
@@ -375,9 +394,10 @@ function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample
             samples = indices.map(function(i){ return sample_space[i] });
             return [basis, samples];
         }
+        if(Profiler.timeout<=Profiler.time('Total execution time')) break;
    }
-   log(('[Error] Cannot find a valid sampling within ' + Settings.max_num_basis_probe + ' trials.').bold.red);
-   throw 'Cannot find a basis!';
+   log(('[Error] Cannot find a valid sampling within timeout.').bold.red);
+   throw 'timeout';
 }
 
 function refine_constraint(coeff_list, constraint, constraints) {
@@ -389,7 +409,7 @@ function refine_constraint(coeff_list, constraint, constraints) {
     constraints.forEach(function(c){ z3_formula += c + "\n" });
     z3_formula += "s.check()\nprint s.model()";
 
-    var result = sh.exec('echo "' + z3_formula + '" | tee z3.refine.log | python -').stdout;
+    var result = Profiler.exec('python -c "' + z3_formula + '"'); // z3.refine.log
     Profiler.tick('Guessing coefficients');
 
     // sat
@@ -425,7 +445,8 @@ function build_template(num_samples, monomials, basis) {
 }
 
 function main(timeout) {
-    Profiler.tick('Total execution time');
+    Profiler.reset(timeout);
+    Profiler.start('Total execution time');
 
     var args = process.argv.slice(2);
     var upper = Settings.lagrange.upper; // 3
@@ -500,11 +521,11 @@ function main(timeout) {
         return (from==to ? from : (to*fact(fact, from, to-1)));
     });
 
-    if(!isInt(num_samples)||num_samples<1) { console.error('Invalid number of samples: ' + num_samples); return; }
+    if(!isInt(num_samples)||num_samples<1) { log('Invalid number of samples: ' + num_samples); return; }
 
     var sample_space = build_sample_space(lower, upper, num_vars, num_samples);
 
-    if(!sample_space.length){ console.error('Sample space is empty.'); return; }
+    if(!sample_space.length){ log('Sample space is empty.'); return; }
 
     // When degree==2, monomials is [[2,0,0],[0,2,0],[0,0,2],[1,1,0],[1,0,1],[0,1,1],[1,0,0],[0,1,0],[0,0,1],[0,0,0]]
     var monomials = (function () {
@@ -642,7 +663,7 @@ function main(timeout) {
             function(a,i){ return var_names[i-1] }
         )));
         _z3_prog = _z3_prog_header + 'print simplify(' + _z3_prog + ')';
-        var poly = require("execSync").exec('echo "' + _z3_prog + '" | python -').stdout;
+        var poly = Profiler.exec('python -c "' + _z3_prog + '"');
         return poly.replace(/(-?\d+\/\d+)/g, '($1)').replace(/\n/g, ' ').replace(/\*\*/g,'^');
     }
 
@@ -684,16 +705,14 @@ function main(timeout) {
             /* check if the formula (without free variables) is satisfiable */
             //constraints.forEach(function(c){ z3_prog += c + "\n" });
             z3_prog += "print s.check()";
-            var result = sh.exec('echo "' + z3_prog + '" | tee z3.qcheck.log | python -').stdout;
+            var result = Profiler.exec('python -c "' + z3_prog + '"'); // z3.qcheck.log
             var passed = /^sat/.test(result);
+
             // abort if Z3 outputs error messages
             if(!passed && !/^unsat/.test(result)) throw result.bold.red;
 
             log('Point (' + point.cyan + ') ' + (passed? 'passed'.green : 'failed'.red), Verbose.INFORMATIVE);
-            //log('Time for normalization: ' + Profiling['normalization'] + 's', Verbose.DEBUG);
-            //log('Critical: ' + Profiling['symbolic'] + 's' + "\n", Verbose.DEBUG);
-            //Profiler.reset('normalization');
-            //Profiler.reset('symbolic');
+
             return !passed ? new_constraint : null;
         }
 
@@ -877,7 +896,7 @@ function main(timeout) {
                   + '; invariant := ' + redlog + '; feasible := rlsimpl rlqe invariant;';
 
         var command = "echo '" + redlog + "' | tee solver.log | ./reduce";
-        result = sh.exec(command).stdout;
+        result = Profiler.exec(command);
 
         log();
         log("Redlog code\n".bold + redlog, Verbose.INFORMATIVE);
@@ -892,7 +911,7 @@ function main(timeout) {
 
             while(constraints.length<3) {
                 var cex1 = cex + (constraints.length ? ' and ' : '') + constraints.join(' and ') + ' and not (' + _ruleRL + ')))); cex := rlqea find_cex;';
-                var cex_desc1 = sh.exec('echo "' + cex1 + '" | tee cex.log | ./reduce').stdout;
+                var cex_desc1 = Profiler.exec('echo "' + cex1 + '" | tee cex.log | ./reduce');
                 log("Resolving a Cex with Redlog:\n\n".bold + cex_desc1);
                 if(!cex_desc) cex_desc = cex_desc1;
 
@@ -944,7 +963,8 @@ function main(timeout) {
                     console.log("Z3 formula for generating Cex:\n".bold + cex_desc.yellow);
                     var z3_prog = "from z3 import *\n" + var_names.map(function(name){ return name + " = Int('" + name + "')\n" }).join('');
                     z3_prog += "s = Solver()\ns.add(" + cex_desc + ")\ns.check()\nprint s.model()";
-                    var result = sh.exec('echo "' + z3_prog + '" | tee z3.cex.log | python -').stdout;
+                    var result = Profiler.exec('python -c "' + z3_prog + '"'); // z3.cex.log
+                   
                     // should be sat
                     if(result[0]=='[') {
                         eval('var ' + var_names.toString() + ';'
@@ -1059,7 +1079,7 @@ function main(timeout) {
                             case 'python':
                                 token = token.replace(/\/(\d+)/g, '\/$1.0');
                                 var command = 'echo -n $(python -c "print ' + token + '" | sed \'s/\\..*$//\')';
-                                token = sh.exec(command).stdout;
+                                token = Profiler.exec(command);
                                 break;
                             case 'javascript':
                                 token = token.replace(/\(([\d\-]+)\)\*\*(\d+)/g, function(a,b,c){ return 'Math.pow('+b+','+c+')' })
@@ -1070,7 +1090,7 @@ function main(timeout) {
                             case 'mathomatic':
                                 var command = 'echo -n $(mathomatic -ceq "' + token + '" | tail -n1 | sed \'s/^.* \\([^ ][^ ]*\\)$/\\1/\')';
                                 //log("Command: ".bold + command, Verbose.DEBUG);
-                                token = sh.exec(command).stdout;
+                                token = Profiler.exec(command);
                                 break;
                             default: throw 'Invalid mode: ' + Settings.symbolic.evaluator;
                         }
@@ -1143,26 +1163,14 @@ function main(timeout) {
        return undefined;    // cannot find an invariant
    };
 
-    var result, pre, post, execution_time;
-    try {
-        while(true) {
-            setTimeout(function(){ throw 'Timeout!'; }, timeout*1000);
-            result = guess_invariant();
-            Profiler.tick('Total execution time');
-            execution_time = Math.min(timeout, +Timers['Total execution time']);
-            if(result!==undefined) break;
-            if(execution_time==timeout) break;
-        }
-    }catch(e) {
-        execution_time = timeout;
-    }
-    pre  = pre.substr(1,pre.length-2);
-    post = post.substr(1,post.length-2);
+    var result = guess_invariant();
+    var pre    = pre.substr(1,pre.length-2);
+    var post   = post.substr(1,post.length-2);
 
     if(result) {
         log("\n"+'Invariant has been proved successfully.'.yellow.bold);
         result = template_to_string(result, var_names, template.replace(/\^/g,'**'));
-        //result = sh.exec("echo 'load_package redlog; rlset " + Settings.redlog.theory + "; poly := " + result + ";' | ./reduce | grep poly | grep -o '(.*>' | sed 's/[(>]//g' | sed 's/  /^2 /g'").stdout;
+        //result = Profiler.exec("echo 'load_package redlog; rlset " + Settings.redlog.theory + "; poly := " + result + ";' | ./reduce | grep poly | grep -o '(.*>' | sed 's/[(>]//g' | sed 's/  /^2 /g'");
     }else {
         log();
         log("Pre-condition:  ".bold + pre);
@@ -1172,33 +1180,43 @@ function main(timeout) {
             log("\n" + "Invariant does not exists.".bold.red);
             result = 'None';
         }else {
-            if(execution_time>=timeout)
-                log("\n"+'Failed to prove invariant due to timeout.'.bold.red);
-            else
-                log("\n"+'Failed to prove invariant due to invalid counter-example.'.bold.red);
+            log("\n"+'Failed to prove invariant due to invalid counter-example.'.bold.red);
             result = 'Unknown';
         }
     }
+    Profiler.stop('Total execution time');
 
-    console.error("\n"+"Profiling of ".bold + test_name.yellow.bold);
-    for(var mark in Timers) {
-        console.error(mark + ":\t" + (Timers[mark].toFixed(2) + 's').cyan);
+    log("\n"+"Profiling of ".bold + test_name.yellow.bold);
+    for(var mark in Profiler.timers) {
+        log(mark + ":\t" + (Profiler.timers[mark].toFixed(2) + 's').cyan);
     }
-    for(var mark in Counters) {
-        console.error(mark + ":\t" + Counters[mark].toString().cyan);
+    for(var mark in Profiler.counters) {
+        log(mark + ":\t" + Profiler.counters[mark].toString().cyan);
     }
-    console.error('No. of refinements:\t' + num_refinement.toString().cyan);
-    console.error('Pre-expectation:\t' + pre);
-    console.error('Post-expectation:\t' + post);
-    console.error("Invariant:\t\t" + result.cyan);
-    Profiler.reset();
-    return execution_time;
-}
+    log('No. of refinements:\t' + num_refinement.toString().cyan);
+    log('Pre-expectation:\t' + pre);
+    log('Post-expectation:\t' + post);
+    log("Invariant:\t\t" + result.cyan);
 
-var TIMEOUT = 10;
-var NUM_RUNS = 10;
+    return Profiler.timers['Total execution time'] * (result=='Unknown' ? -1 : 1);
+} // end of main
+
+var TIMEOUT = 300;
+var NUM_RUNS = 100;
 var total_execution_time = 0;
 for(var i=0; i<NUM_RUNS; i++) {
-    total_execution_time += main(TIMEOUT);
+    var timeout = TIMEOUT;
+    try {
+        while(true) {
+            var time = main(TIMEOUT);
+            timeout += (time>0 ? -1:1)*time;
+            if(time>0 || timeout<=0) break;
+        }
+        total_execution_time += TIMEOUT - timeout;
+    }catch(e) {
+        if(e!='timeout') throw e;
+        total_execution_time += TIMEOUT;    
+        log("\n"+'Failed to prove invariant due to timeout.'.bold.red);
+    }
 }
 console.log("\n\nAverage execution time: " + (total_execution_time/NUM_RUNS).toFixed(2));
