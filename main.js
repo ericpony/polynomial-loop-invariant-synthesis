@@ -11,7 +11,7 @@ var Verbose = {
 var Settings = {
     /**
      * Set the theory in which quantifier elimination is performed.
-     * The value can be either 'pasf' (Presburg arithematics) 
+     * The value can be either 'pasf' (Presburg arithematics)
      * or 'ofsf' (approximation of real number arithematics).
      */
     redlog: { theory: 'ofsf' },
@@ -28,7 +28,7 @@ var Settings = {
     lagrange: { lower: 0, upper: 3, skewness: .65 },
     /**
      * Set the evaluators of numerical expressions.
-     * Currently, three evaluators are supported: 
+     * Currently, three evaluators are supported:
      * 'mathomatic', 'javascript', and 'python'.
      */
     symbolic: { evaluator: 'javascript' },
@@ -56,7 +56,7 @@ function bool_val(val) {
     return (sval=='true'||sval=='yes'||sval=='1'||sval=='t') ? true : (sval=='false'||sval=='no'||sval=='0'||sval=='f') ? false : Boolean(val);
 }
 
-/** 
+/**
  * This is the multiply-with-carry (MWC) random generator with
  * a pretty long period. Adapted from Wikipedia, see
  * http://en.wikipedia.org/wiki/Random_number_generation#Computational_methods
@@ -96,8 +96,12 @@ String.prototype.insertAt = function(str, index) {
 var Timers = {}, Counters = {};
 var Profiler = {
     timers: {},
-    tick: function(mark) { if(this.timers[mark]) this.stop(mark); else this.start(mark); },
-    start: function(mark){ this.timers[mark] = process.hrtime(); },
+    tick:  function(mark) {
+        if(this.timers[mark]) this.stop(mark); else this.start(mark);
+    },
+    start: function(mark) {
+        this.timers[mark] = process.hrtime();
+    },
     stop:  function(mark) {
         if(!this.timers[mark]) throw 'Should start a timer before stopping it: ' + mark;
         var elapsed = process.hrtime(this.timers[mark]);
@@ -105,8 +109,14 @@ var Profiler = {
         Timers[mark] = (Timers[mark] || 0) + elapsed;
         this.timers[mark] = false;
     },
-    reset: function(mark) { Counters[mark] = 0 },
-    count: function(mark) { Counters[mark] = (Counters[mark]||0) + 1 }
+    count: function(mark) {
+        Counters[mark] = (Counters[mark]||0) + 1
+    },
+    reset: function() {
+        this.timers = {};
+        Timers = {};
+        Counters = {};
+    }
 };
 
 /* Sample class */
@@ -328,11 +338,11 @@ function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample
         return result;
     }
     var point_weights = sample_space.map(function(s) {
-            var weight = Math.pow(1-skewness, s.diff===undefined ? 1/(1-skewness) : s.diff);
-//          var weight = Math.pow(1-skewness, s.diff===undefined ? 1/(1-skewness)/(1-skewness) : s.diff);
-            log(pt_str(s.point) + ' ' + s.constraint + ' ' + round(weight,4).toString().cyan, Verbose.INFORMATIVE+1);
-            return [s.point, weight];
-        });
+        var weight = Math.pow(1-skewness, s.diff===undefined ? 1/(1-skewness) : s.diff);
+//      var weight = Math.pow(1-skewness, s.diff===undefined ? 1/(1-skewness)/(1-skewness) : s.diff);
+        log(pt_str(s.point) + ' ' + s.constraint + ' ' + round(weight,4).toString().cyan, Verbose.INFORMATIVE+1);
+        return [s.point, weight];
+    });
     var _points  = point_weights.map(function(s){ return s[0] });
     var _weights = point_weights.map(function(s){ return s[1] });
     var _weight = _weights.reduce(function(a,b){ return a+b });
@@ -414,7 +424,7 @@ function build_template(num_samples, monomials, basis) {
     return terms;
 }
 
-function main() {
+function main(timeout) {
     Profiler.tick('Total execution time');
 
     var args = process.argv.slice(2);
@@ -800,7 +810,7 @@ function main() {
     /** Convert the simplified formula produced by RedLog to Z3py format
      *  Example:
      *  input:  ((n >= 0 and y >= 0) and not(0 <= 0 and (n > 0 impl 0 <= 0) and (n <= 0 impl  - x <= 0)))
-     *  output: And(And(n >= 0 , y >= 0) ,Not(And(0 <= 0 , Implies(n > 0 , 0 <= 0) , Implies(n <= 0 ,  - x <= 0)))) 
+     *  output: And(And(n >= 0 , y >= 0) ,Not(And(0 <= 0 , Implies(n > 0 , 0 <= 0) , Implies(n <= 0 ,  - x <= 0))))
      */
     function RL_to_Z3(expr) {
         return (function rec(expr) {
@@ -1133,7 +1143,19 @@ function main() {
        return undefined;    // cannot find an invariant
    };
 
-    var result = guess_invariant();
+    var result, pre, post, execution_time;
+    try {
+        while(true) {
+            setTimeout(function(){ throw 'Timeout!'; }, timeout*1000);
+            result = guess_invariant();
+            Profiler.tick('Total execution time');
+            execution_time = Math.min(timeout, +Timers['Total execution time']);
+            if(result!==undefined) break;
+            if(execution_time==timeout) break;
+        }
+    }catch(e) {
+        execution_time = timeout;
+    }
     pre  = pre.substr(1,pre.length-2);
     post = post.substr(1,post.length-2);
 
@@ -1150,11 +1172,14 @@ function main() {
             log("\n" + "Invariant does not exists.".bold.red);
             result = 'None';
         }else {
-            log("\n"+'Failed to prove invariant.'.bold.red);
-            result = 'Unknown'
+            if(execution_time>=timeout)
+                log("\n"+'Failed to prove invariant due to timeout.'.bold.red);
+            else
+                log("\n"+'Failed to prove invariant due to invalid counter-example.'.bold.red);
+            result = 'Unknown';
         }
     }
-    Profiler.tick('Total execution time');
+
     console.error("\n"+"Profiling of ".bold + test_name.yellow.bold);
     for(var mark in Timers) {
         console.error(mark + ":\t" + (Timers[mark].toFixed(2) + 's').cyan);
@@ -1166,7 +1191,14 @@ function main() {
     console.error('Pre-expectation:\t' + pre);
     console.error('Post-expectation:\t' + post);
     console.error("Invariant:\t\t" + result.cyan);
-    return;
+    Profiler.reset();
+    return execution_time;
 }
 
-main();
+var TIMEOUT = 10;
+var NUM_RUNS = 10;
+var total_execution_time = 0;
+for(var i=0; i<NUM_RUNS; i++) {
+    total_execution_time += main(TIMEOUT);
+}
+console.log("\n\nAverage execution time: " + (total_execution_time/NUM_RUNS).toFixed(2));
