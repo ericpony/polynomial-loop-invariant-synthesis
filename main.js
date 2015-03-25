@@ -10,6 +10,7 @@ var Verbose = {
 };
 var Settings = {
     /**
+<<<<<<< HEAD
      * The theory in which quantifier elimination is performed. 
      * The value can be either 'pasf' (Presburg arithematics) 
      * or 'ofsf' (an approximation of real number arithematics).
@@ -20,14 +21,33 @@ var Settings = {
      * Skewness determines how the sampling points are chosen.
      * When skewness = 1, sampling are made uniformly from the sample space.
      * As skewness approaches zero, the result of sampling tends to
+=======
+     * Set the theory in which quantifier elimination is performed.
+     * The value can be either 'pasf' (Presburg arithematics) 
+     * or 'ofsf' (approximation of real number arithematics).
+     */
+    redlog: { theory: 'ofsf' },
+    /**
+     * lower: lowerbound of the sampling points
+     * upper: upperbound of the sampling points
+     * skewness: parameter to weight the sampling points
+     * When skewness = 1, sampling are made uniformly from the sample space.
+     * As skewness approaches zero, the result of the sampling tends to
+>>>>>>> 4bf68821e3a4efaaaa73c6b5518ad58ab4677820
      * determine more constraints. However, the benefit comes at the cost of
      * longer sampling time and lower possibility to spot a Lagrange basis
      * in a given timeout.
      */
     lagrange: { lower: 0, upper: 3, skewness: .65 },
     /**
+<<<<<<< HEAD
      * Currently, three evaluators of numerical expressions 
      * are supported: 'mathomatic', 'javascript', and 'python'.
+=======
+     * Set the evaluators of numerical expressions.
+     * Currently, three evaluators are supported: 
+     * 'mathomatic', 'javascript', and 'python'.
+>>>>>>> 4bf68821e3a4efaaaa73c6b5518ad58ab4677820
      */
     symbolic: { evaluator: 'javascript' },
     max_num_basis_probe: 500,
@@ -139,7 +159,11 @@ Node.create = function(name) {
     return subclass;
 }
 
+<<<<<<< HEAD
 // make Node an algebraic data type
+=======
+// make subclasses of Node behave like algebraic data types
+>>>>>>> 4bf68821e3a4efaaaa73c6b5518ad58ab4677820
 var Not = Node.create('Not'), And = Node.create('And'), Or = Node.create('Or'), Imp = Node.create('Imp');
 
 Node.to_z3_formula = function(string_parser) {
