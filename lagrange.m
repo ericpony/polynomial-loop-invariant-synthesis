@@ -1,14 +1,7 @@
-#! /home/ericpony/octave
-
 function result = Lagrange(degree, num_var, num_term, samples, nomials)
-%   load polynomial.txt;
-%   load samples.txt;    
-    % when degree = 2
-    % list all nomials of a polynomial with degree <=2
-%   nomials = [[2 0 0]' [0 2 0]' [0 0 2]' [1 1 0]' [1 0 1]' [0 1 1]' [1 0 0]' [0 1 0]' [0 0 1]' [0 0 0]']';
-%   poly = LagrangePolynomial(polynomial, samples, nomials);
-
+ 
     result = LagrangeBasis(degree, num_var, num_term, samples, nomials);
+
     if(iscell(result))
         lagrangeBasis = result{1};
         detVandermonde = result{2};
@@ -20,8 +13,9 @@ function result = Lagrange(degree, num_var, num_term, samples, nomials)
 end
 
 function lagrange_basis = LagrangeBasis(degree, num_var, num_term, sample_points, nomial_matrix)
-    % Output: A (m+1)xm matrix that gives the Lagrange representation of the polynomial
-    
+    % Input: A polynomial with deg = d, #vars = n, #terms = m = (d+n)!/d!n!, and a vector of m sample points
+    % Output: A (m+1) x m matrix that gives the Lagrange representation of the polynomial
+
     if(num_var ~= size(sample_points, 2))
         error('Each sample needs %d coordinates.', num_var);
     end
@@ -61,7 +55,7 @@ end
 
 function lagrange_polynomial = LagrangePolynomial(target_polynomial, sample_points, nomial_matrix)
     % Input: A polynomial with deg = d, #vars = n, #terms = m = (d+n)!/d!n!, and a vector of m sample points
-    % Output: A (m+1)xm matrix that gives the Lagrange representation of the target polynomial
+    % Output: A (m+1) x m matrix that gives the Lagrange representation of the target polynomial
     
     degree = max(sum(target_polynomial(:,2:end), 2));
     num_var = size(target_polynomial, 2) - 1;    

@@ -1,19 +1,19 @@
 var fs = require('fs');
 var sh = require("execSync");
 var colors = require('colors');
-var tripwire = require('tripwire');
 
 var Verbose = {
-  QUIET:    -1,
-  NORMAL:    0,
+  QUIET:      -1,
+  NORMAL:      0,
   INFORMATIVE: 1,
-  DEBUG:     10
+  DEBUG:       10
 };
 var Settings = {
   /**
-   * Set the theory in which quantifier elimination is performed.
+   * theory: set the theory in which quantifier elimination is performed.
    * The value can be either 'pasf' (Presburg arithematics)
    * or 'ofsf' (approximation of real number arithematics).
+   * exec: set the command to run RedLog
    */
   redlog: { theory: 'ofsf' },
   /**
@@ -35,6 +35,8 @@ var Settings = {
   symbolic: { evaluator: 'javascript' },
   max_num_sample_verification: 100,
   verbose_level: 0,
+  reduce_exec: 'redpsl',
+  octave_exec: 'octave -qf --no-window-system' 
 };
 var precond, postcond, testcase, num_refinement = 0;
 var USE_APPROX_ROUNDING = false;
@@ -321,7 +323,7 @@ function compute_lagrange_basis(degree, num_samples, monomials, skewness, sample
 
   function lagrange(samples) {
     var S = '[' + samples.join('; ') + ']';
-    var command = './lagrange.m "' + degree + '" "' + num_vars + '" "' + num_samples + '" "' + S + '" "' + N + '"';
+    var command = Settings.octave_exec + ' ./lagrange.m "' + degree + '" "' + num_vars + '" "' + num_samples + '" "' + S + '" "' + N + '"';
     var basis = Profiler.exec(command + ' 2>/dev/null');
     if(!/^singular/.test(basis)) {
       basis = basis.split(/ +/);
@@ -413,7 +415,7 @@ function refine_constraint(coeff_list, constraint, constraints) {
   constraints.forEach(function(c){ z3_formula += c + "\n" });
   z3_formula += "s.check()\nprint s.model()";
 
-  var result = Profiler.exec('python -c "' + z3_formula + '"'); // z3.refine.log
+  var result = Profiler.exec('python -c "' + z3_formula + '" 2>&1');
   Profiler.tick('Guessing coefficients');
 
   // sat
@@ -569,7 +571,7 @@ function main(timeout) {
 
   log("Sampling\n".bold +'Points: (' + samples.map(function(s){ return s.point }).join('), (') + ')', Verbose.INFORMATIVE);
   if(Settings.verbose_level>=Verbose.INFORMATIVE)
-    samples.forEach(function(s){ console.log(pt_str(s.point) + ' ' + s.constraint) });
+    samples.forEach(function(s){ log(pt_str(s.point) + ' ' + s.constraint) });
 
   log('Constraints'.bold, Verbose.INFORMATIVE);
 
@@ -703,7 +705,7 @@ function main(timeout) {
         ruleZ3 = ruleZ3.replace(new RegExp(name,'g'), coeff[name]);
       }
       var z3_prog = "from z3 import *\ns = Solver()\n" + ruleZ3 + "\nprint s.check()";
-      var result = Profiler.exec('python -c "' + z3_prog + '"'); // z3.qcheck.log
+      var result = Profiler.exec('python -c "' + z3_prog + '" 2>&1');
       var passed = /^sat/.test(result);
 
       // abort if Z3 outputs error messages
@@ -808,7 +810,7 @@ function main(timeout) {
       return $lcm;
     })(1);
 
-    console.log("LCM: ".bold + $lcm.toString().cyan, Verbose.DEBUG);
+    log("LCM: ".bold + $lcm.toString().cyan, Verbose.DEBUG);
 
     // only handle the non-trivial case
     if($lcm>1) {
@@ -891,7 +893,7 @@ function main(timeout) {
     redlog = 'load_package redlog; rlset ' + Settings.redlog.theory + '; poly := ' + polyRL
           + '; invariant := ' + redlog + '; feasible := rlsimpl rlqe invariant;';
 
-    var command = "echo '" + redlog + "' | tee solver.log | ./reduce";
+    var command = "echo '" + redlog + "' | " + Settings.reduce_exec;
     result = Profiler.exec(command);
 
     log();
@@ -907,7 +909,7 @@ function main(timeout) {
 
       while(constraints.length<3) {
         var cex1 = cex + (constraints.length ? ' and ' : '') + constraints.join(' and ') + ' and not (' + _ruleRL + ')))); cex := rlqea find_cex;';
-        var cex_desc1 = Profiler.exec('echo "' + cex1 + '" | tee cex.log | ./reduce');
+        var cex_desc1 = Profiler.exec('echo "' + cex1 + '" | ' + Settings.reduce_exec);
         log("Resolving a Cex with Redlog:\n\n".bold + cex_desc1);
         if(!cex_desc) cex_desc = cex_desc1;
 
@@ -959,7 +961,7 @@ function main(timeout) {
           log("Z3 formula for generating Cex:\n".bold + cex_desc.yellow);
           var z3_prog = "from z3 import *\n" + var_names.map(function(name){ return name + " = Int('" + name + "')\n" }).join('');
           z3_prog += "s = Solver()\ns.add(" + cex_desc + ")\ns.check()\nprint s.model()";
-          var result = Profiler.exec('python -c "' + z3_prog + '"'); // z3.cex.log
+          var result = Profiler.exec('python -c "' + z3_prog + '" 2>&1');
            
           // should be sat
           if(result[0]=='[') {
@@ -968,7 +970,7 @@ function main(timeout) {
                + 'point = [' + var_names + ']');
             point.forEach(function(p,i){ point[i] = p ? p : 0 });
           }else {
-            log("\n"+'[Warning] Z3 cannot resolve a counter-example '.bold +"(check z3.cex.log for details):\n" + result);
+            log("\n"+'[Warning] Z3 cannot resolve a counter-example: '.bold +"\n" + result);
             return [undefined, undefined]
           }
         }
@@ -1160,7 +1162,7 @@ function main(timeout) {
   if(result) {
     log("\n"+'Invariant has been proved successfully.'.yellow.bold);
     result = template_to_string(result, var_names, template.replace(/\^/g,'**'));
-    //result = Profiler.exec("echo 'load_package redlog; rlset " + Settings.redlog.theory + "; poly := " + result + ";' | ./reduce | grep poly | grep -o '(.*>' | sed 's/[(>]//g' | sed 's/  /^2 /g'");
+    //result = Profiler.exec("echo 'load_package redlog; rlset " + Settings.redlog.theory + "; poly := " + result + ";' | " + Settings.reduce_exec + " | grep poly | grep -o '(.*>' | sed 's/[(>]//g' | sed 's/  /^2 /g'");
   }else {
     log();
     log("Pre-condition:  ".bold + pre);
@@ -1209,4 +1211,4 @@ for(var i=0; i<NUM_RUNS; i++) {
     log("\n"+'Failed to prove invariant due to timeout.'.bold.red);
   }
 }
-console.log("\n\nAverage execution time: " + (total_execution_time/NUM_RUNS).toFixed(2));
+log("\n\nAverage execution time: " + (total_execution_time/NUM_RUNS).toFixed(2));
