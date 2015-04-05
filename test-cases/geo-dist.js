@@ -9,6 +9,7 @@ module.exports = {
          *       pre:  3*x*y +n
          *       post: n
          */
+        vars:   'x,y,n',
         domain: '(x=0 or x=1) and y>=0 and n>=0',
         filter: function(x,y,n){ return x==0 || x==1; },
         check: function(x,y,n,constraints) {

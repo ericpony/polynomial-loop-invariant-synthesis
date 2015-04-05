@@ -7,6 +7,7 @@ module.exports = {
      *       x>0  impl 2*I(x,y,n) <= I(x-1,y,n)+I(x,y,n+1)
      *       x<=0 impl I(x,y,n) <= post-condition
      */
+    vars:   'x,y,n',
 //  domain: '(x=0 or x=1)and y>=0 and n>=0',
     domain: 'x>=0 and y>=0 and n>=0',
 //  filter: function(x,y,n){ return x==0 || x==1; },

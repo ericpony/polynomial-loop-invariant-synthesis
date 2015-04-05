@@ -9,6 +9,7 @@ module.exports = {
      *
      * Example: var=x,y,n 'pre=y' 'post=x' test=martingale 'inv=x*[n==0]+y*[n<>0]'
      */
+    vars:   'x,y,n',
     domain: 'y>=0 and n>=0',
     check: function(x,y,n,constraints) {
                if(n<0 || y<0) return null;

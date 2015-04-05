@@ -9,6 +9,7 @@ module.exports = {
     *
     * Example: var=x,y,n 'pre=n*n' 'post=4*x*y' test=product2
     */
+    vars:   'x,y,n',
     domain: '(x=0 or x=1) and (y=0 or y=1) and n>=0',
     filter: function(x,y,n){ return ((x==0 || x==1) && (y==0 || y==1)) },
     check: function(x,y,n,constraints) {

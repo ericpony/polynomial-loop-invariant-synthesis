@@ -9,6 +9,7 @@ module.exports = {
          *
          * Example: var=x,y,n 'pre=y*(2*n+1)' 'post=3*x' test=random-square-sum2 theory=pasf skew=.65
          */
+        vars:   'x,y,n',
         domain: 'x>=y and y>=0 and n>=0',
         check: function(x,y,n,constraints) {
                    if(n<0 || x<0 || x<y) return null;

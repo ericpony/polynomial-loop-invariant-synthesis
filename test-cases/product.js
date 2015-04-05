@@ -9,6 +9,7 @@ module.exports = {
     *
     * Example: pre=n(n-1), post=xy, inv = n^2 + 2nx + 2ny + 4xy - n
     */
+    vars:   'x,y,n',
     domain: 'x>=0 and y>=0 and n>=0',
     check: function(x,y,n,constraints) {
                if(x<0 || y<0 || n<0) return null;

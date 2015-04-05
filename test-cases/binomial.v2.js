@@ -7,6 +7,7 @@ module.exports = {
      *       n>0  impl 2*I(x,y,n) <= I(x+n,y,n-1)+I(x+y,y,n-1)
      *       n<=0 impl I(x,y,n) <= post-condition
      */
+    vars:   'x,y,n',
     domain: 'x>=0 and y>=0 and n>=0',
     check: function(x,y,n,constraints) {
                if(n<0 || y<0 || x<0) return null;

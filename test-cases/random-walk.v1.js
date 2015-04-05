@@ -8,6 +8,7 @@ module.exports = {
      *       x==0 impl I(x,n) <= post-condition
      */
     name: 'random-walk-v1',
+    vars:   'x,y,n',
     domain: '0<=x and 0<=y and 0<=n',
     check: function(x,y,n,constraints) {
                if(x<0 || y<0 || n<0) return null;
