@@ -34,7 +34,7 @@ var Settings = {
    */
   symbolic: { evaluator: 'javascript' },
   max_num_sample_verification: 100,
-  verbose_level: 0,
+  verbose_level: 1,
   reduce_exec: 'redpsl',
   octave_exec: 'octave -qf --no-window-system'
 };
@@ -262,12 +262,12 @@ function verify_sample_v0(x,y,n) {
   return new Sample(x+' '+y+' '+n, lower, upper, constraints);
 }
 
-function build_sample_space(lower, upper, num_vars, num_samples) {
+function build_sample_space(num_vars, num_samples) {
   Profiler.tick('Building sample space');
   var samples = [];
   var vars = [];
   (function uniform_sampling(i) {
-    for(var val=lower; val<=upper; val++) {
+    for(var val=LOWERBOUND; val<=UPPERBOUND; val++) {
       vars[i] = val;
       if(i>=num_vars-1) {
         var sample = verify_sample(vars);
@@ -279,7 +279,7 @@ function build_sample_space(lower, upper, num_vars, num_samples) {
   })(0);
   if(samples.length<num_samples)
     throw 'Unable to build large enough sample space: ' + samples.length + ' probed, ' + num_samples + ' needed.'
-          + "\n\n" + 'Hint: try to adjust parameter "lower" and "upper". Current values: (' + lower + ', ' + upper + ')';
+          + "\n\n" + 'Hint: try to adjust parameter "lower" and "upper". Current values: (' + LOWERBOUND + ', ' + UPPERBOUND + ')';
 
   samples = samples.sort(function(a,b) {
     return (a.diff===undefined||b.diff===undefined) ? -(Math.abs(a.diff||b.diff)||1) :(a.diff-b.diff);
@@ -653,7 +653,7 @@ var test_coeff = (function() {
       var new_constraint = null;
       (function uniform_sampling(i) {
         if(new_constraint) return;
-        for(var val=lower; val<=upper; val++) {
+        for(var val=LOWERBOUND; val<=UPPERBOUND; val++) {
           vars[i] = val;
           if(i>=num_vars-1) {
             if(testcase.filter.apply(null, vars))
@@ -777,9 +777,9 @@ function verify_poly(coeff, invariant_regex) {
   result = Profiler.exec(command);
 
   log();
-  log("Redlog code\n".bold + redlog, Verbose.INFORMATIVE);
+  //log("Redlog code\n".bold + redlog, Verbose.INFORMATIVE);
   log("Polynomial\n".bold + templ, Verbose.INFORMATIVE);
-  log("Result\n".bold + result);
+  log("Result\n".bold + result.replace(/\d+:/g, ''));
 
   if(/:= false/.test(result) || !/:= true/.test(result)) {
     var cex = 'load_package redlog; rlset ' + Settings.redlog.theory + '; find_cex := ex(x, ex(y, ex(n, (' + testcase.domain + ')';
@@ -966,7 +966,7 @@ function main(timeout) {
 
   if(!isInt(num_samples) || num_samples<1) throw 'Invalid number of samples: ' + num_samples;
 
-  var sample_space = build_sample_space(LOWERBOUND, UPPERBOUND, num_vars, num_samples);
+  var sample_space = build_sample_space(num_vars, num_samples);
 
   if(!sample_space.length) throw 'Sample space is empty.';
 
