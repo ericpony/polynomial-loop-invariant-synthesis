@@ -1,12 +1,12 @@
 # Polynomial loop invariant synthesis
-This node.js script tries to verify a flat probabilistic while-loop written in [pCGL](http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.42.1798), the probabilistic Guarded Command Language, and annotated with a pre-expectation and a post-expectation. You will need node.js with ver ≥ 0.10 to run this script. Besides, the following tools must be accessible in the shell:
+This node.js script tries to verify a flat probabilistic while-loop annotated with a pre-expectation and a post-expectation. You will need node.js with ver ≥ 0.10 to run this script. Besides, the following tools must be accessible in the shell:
 * Octave
 * Redlog
 * Z3py
 
 ## Example
 
-Consider a pCGL loop which models a symmetric bounded random walk  (see `random-walk.js` in folder `test-cases`):
+Consider a probabilistic loop that models a symmetric bounded random walk:
 
     n = 0; 
     while(0<x && x<y) { 
@@ -14,7 +14,7 @@ Consider a pCGL loop which models a symmetric bounded random walk  (see `random-
         n++; 
     }
 
-The following command generates for the above loop a polynomial loop invariant with degree ≤ 2 and variables `x`, `y` and `n`:
+For this loop (see `random-walk.js` in folder `test-cases`), the following command generates a polynomial loop invariant with degree ≤ 2 and variables `x`, `y` and `n`:
 
     node main.js var=x,y,n deg=2 'pre=x*(y-x)' post=n test=random-walk
 
