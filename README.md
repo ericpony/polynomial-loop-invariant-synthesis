@@ -16,9 +16,9 @@ Consider a probabilistic loop that models a symmetric bounded random walk:
 
 For this loop (see `random-walk.js` in folder `test-cases`), the following command generates a polynomial loop invariant with degree ≤ 2 and variables `x`, `y` and `n`:
 
-    node main.js var=x,y,n deg=2 'pre=x*(y-x)' post=n test=random-walk
+    node main.js deg=2 'pre=x*(y-x)' post=n test=random-walk
 
-The existence of loop invariant asserts that when the loop terminates, the expected value of program variable `n` is no less than the value of the expression `x*(y-x)` evaluated right before the loop is entered. Note that the output of this script is meaningfult only if the loop terminates with probability 1, which has to be verified separately (e.g., by finding a loop variant).
+The existence of loop invariant asserts that when the loop terminates, the *expected* value of program variable `n` is no less than the value of the expression `x*(y-x)` evaluated right before the loop is entered. Note that the output of this script is meaningful only if the loop terminates with probability 1, which has to be verified separately (e.g., by finding a loop variant).
 
 ## Todo
 
