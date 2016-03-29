@@ -14,13 +14,13 @@ Consider a probabilistic loop that models a symmetric bounded random walk (see `
         n++; 
     }
 
-The following command will generate a polynomial loop invariant with degree ≤ 2, pre-expectation `x*(y-x)`, and post-expectation `n` for the above loop:
+The following command will generate a polynomial loop invariant with degree ≤ 2, pre-expectation `x*(y-x)`, and post-expectation `n` for the above loop, assuming that all variables range over non-negative integers:
 
     node main.js deg=2 'pre=x*(y-x)' post=n test=random-walk
 
 The existence of loop invariant asserts that when the loop terminates, the *expected* value of program variable `n` (i.e. the post-expectation) is no less than the value of expression `x*(y-x)` (i.e. the pre-expectation) evaluated right before the loop is entered. 
 
-Note that the output of this script is meaningful only if the loop terminates with probability 1, which has to be verified separately, e.g., by finding a loop variant manually.
+Note that the output of this script is meaningful only if the provided loop terminates with probability 1. You may have to verify this condition manually.
 
 ## Todo
 
